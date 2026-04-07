@@ -1,0 +1,189 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: projects
+    // Fields:
+    //   - name: string (required, 1-100 chars)
+    //   - repoUrl: string (required, valid URL)
+    //   - uid: string (required, immutable)
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // Collection: notes
+    // Fields:
+    //   - title: string (required, 1-100 chars)
+    //   - projectId: string (required)
+    //   - summary: string (required, 1-1000 chars)
+    //   - body: string (required, 1-10000 chars)
+    //   - folder: string (required, 1-100 chars)
+    //   - noteType: string (required, enum: Domain, Module, Logic, Snapshot)
+    //   - status: string (required, enum: Planned, Done, Conflict)
+    //   - priority: string (required, enum: A, B, C, Done)
+    //   - lastUpdated: timestamp (required)
+    //   - parentNoteIds: list (required, max 50 items)
+    //   - childNoteIds: list (required, max 50 items)
+    //   - relatedNoteIds: list (required, max 50 items)
+    //   - uid: string (required, immutable)
+    //
+    // Collection: syncLedgers
+    // Fields:
+    //   - repoUrl: string (required, valid URL)
+    //   - projectId: string (required)
+    //   - fileShaMap: map (required)
+    //   - lastSyncedAt: timestamp (required)
+    //   - uid: string (required, immutable)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+       return request.auth != null;
+    }
+
+    function isOwner(userId) {
+       return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner(docData) {
+       return isAuthenticated() && request.auth.uid == docData.uid;
+    }
+
+    function uidUnchanged(newDoc) {
+       return !('uid' in newDoc) || newDoc.uid == request.auth.uid;
+    }
+
+    function uidNotModified(oldDoc, newDoc) {
+       return !('uid' in newDoc) || newDoc.uid == oldDoc.uid;
+    }
+
+    function hasRequiredFields(data, fields) {
+       return data.keys().hasAll(fields);
+    }
+
+    function validStringLength(data, field, minLen, maxLen) {
+       return data[field] is string &&
+         data[field].size() >= minLen &&
+         data[field].size() <= maxLen;
+    }
+
+    function isValidUrl(url) {
+       return url is string &&
+         (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    function hasOnlyAllowedFields(data, fields) {
+      return data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(oldDoc, newDoc, fields) {
+      return !newDoc.diff(oldDoc).affectedKeys().hasAny(fields);
+    }
+
+    function isValidList(list, maxSize) {
+      return list is list && list.size() <= maxSize;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "kwoncho1001@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidProject(data) {
+      return hasRequiredFields(data, ['name', 'repoUrl', 'uid', 'createdAt']) &&
+             hasOnlyAllowedFields(data, ['name', 'repoUrl', 'uid', 'createdAt']) &&
+             validStringLength(data, 'name', 1, 100) &&
+             (data.repoUrl == '' || isValidUrl(data.repoUrl)) &&
+             data.uid is string &&
+             (data.createdAt is timestamp || data.createdAt is string);
+    }
+
+    function isValidNote(data) {
+      return hasRequiredFields(data, ['title', 'projectId', 'summary', 'body', 'folder', 'noteType', 'status', 'priority', 'lastUpdated', 'parentNoteIds', 'childNoteIds', 'relatedNoteIds', 'uid']) &&
+             // Note: Allowing additional fields for optional ones (components, flow, io, etc.)
+             validStringLength(data, 'title', 0, 500) &&
+             validStringLength(data, 'summary', 0, 10000) &&
+             validStringLength(data, 'body', 0, 100000) &&
+             validStringLength(data, 'folder', 0, 500) &&
+             data.noteType in ['Domain', 'Module', 'Logic', 'Snapshot'] &&
+             data.status in ['Planned', 'Done', 'Conflict'] &&
+             data.priority in ['A', 'B', 'C', 'P1', 'P2', 'P3', 'Done'] &&
+             (data.lastUpdated is timestamp || data.lastUpdated is string) &&
+             isValidList(data.parentNoteIds, 50) &&
+             isValidList(data.childNoteIds, 50) &&
+             isValidList(data.relatedNoteIds, 50) &&
+             data.uid is string;
+    }
+
+    function isValidSyncLedger(data) {
+      return hasRequiredFields(data, ['repoUrl', 'projectId', 'fileShaMap', 'lastSyncedAt', 'uid']) &&
+             hasOnlyAllowedFields(data, ['repoUrl', 'projectId', 'fileShaMap', 'lastSyncedAt', 'uid']) &&
+             isValidUrl(data.repoUrl) &&
+             data.fileShaMap is map &&
+             (data.lastSyncedAt is timestamp || data.lastSyncedAt is string) &&
+             data.uid is string;
+    }
+
+    function isValidNoteMetadata(data) {
+      return hasRequiredFields(data, ['projectId', 'contentHash', 'uid']) &&
+             hasOnlyAllowedFields(data, ['projectId', 'contentHash', 'uid']) &&
+             data.projectId is string &&
+             data.contentHash is string &&
+             data.uid is string;
+    }
+
+    function isValidSyncManifest(data) {
+      return hasOnlyAllowedFields(data, ['fileShaMap']) &&
+             data.fileShaMap is map;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /projects/{projectId} {
+      allow read: if isAuthenticated() && (resource == null || isDocOwner(resource.data));
+      allow create: if isAuthenticated() && isValidProject(request.resource.data) && isDocOwner(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner(resource.data) && isValidProject(request.resource.data) && uidNotModified(resource.data, request.resource.data) && areImmutableFieldsUnchanged(resource.data, request.resource.data, ['uid', 'createdAt']);
+      allow delete: if isAuthenticated() && (resource == null || isDocOwner(resource.data));
+    }
+
+    match /notes/{noteId} {
+      allow read: if isAuthenticated() && (resource == null || get(/databases/$(database)/documents/projects/$(resource.data.projectId)).data.uid == request.auth.uid);
+      allow create: if isAuthenticated() && isValidNote(request.resource.data) && get(/databases/$(database)/documents/projects/$(request.resource.data.projectId)).data.uid == request.auth.uid;
+      allow update: if isAuthenticated() && isValidNote(request.resource.data) && get(/databases/$(database)/documents/projects/$(request.resource.data.projectId)).data.uid == request.auth.uid && uidNotModified(resource.data, request.resource.data) && areImmutableFieldsUnchanged(resource.data, request.resource.data, ['uid', 'createdAt']);
+      allow delete: if isAuthenticated() && (resource == null || get(/databases/$(database)/documents/projects/$(resource.data.projectId)).data.uid == request.auth.uid);
+    }
+
+    match /notes_metadata/{noteId} {
+      allow read: if isAuthenticated() && (resource == null || isDocOwner(resource.data));
+      allow create: if isAuthenticated() && isValidNoteMetadata(request.resource.data) && isDocOwner(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner(resource.data) && isValidNoteMetadata(request.resource.data) && uidNotModified(resource.data, request.resource.data) && areImmutableFieldsUnchanged(resource.data, request.resource.data, ['uid']);
+      allow delete: if isAuthenticated() && (resource == null || isDocOwner(resource.data));
+    }
+
+    match /syncLedgers/{ledgerId} {
+      allow read: if isAuthenticated() && (resource == null || isDocOwner(resource.data));
+      allow create: if isAuthenticated() && isValidSyncLedger(request.resource.data) && isDocOwner(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner(resource.data) && isValidSyncLedger(request.resource.data) && uidNotModified(resource.data, request.resource.data) && areImmutableFieldsUnchanged(resource.data, request.resource.data, ['uid']);
+      allow delete: if isAuthenticated() && (resource == null || isDocOwner(resource.data));
+    }
+
+    match /sync_manifests/{projectId} {
+      allow read: if isAuthenticated() && get(/databases/$(database)/documents/projects/$(projectId)).data.uid == request.auth.uid;
+      allow create: if isAuthenticated() && isValidSyncManifest(request.resource.data) && get(/databases/$(database)/documents/projects/$(projectId)).data.uid == request.auth.uid;
+      allow update: if isAuthenticated() && get(/databases/$(database)/documents/projects/$(projectId)).data.uid == request.auth.uid && isValidSyncManifest(request.resource.data);
+      allow delete: if isAuthenticated() && get(/databases/$(database)/documents/projects/$(projectId)).data.uid == request.auth.uid;
+    }
+  }
+}
