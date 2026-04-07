@@ -2,10 +2,11 @@ import { openDB, IDBPDatabase } from 'idb';
 import { Note } from '../types';
 
 const DB_NAME = 'composer-db';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_NOTES = 'notes';
 const STORE_PROJECTS = 'projects';
 const STORE_SYNC_LEDGERS = 'sync_ledgers';
+const STORE_SETTINGS = 'settings';
 
 let dbPromise: Promise<IDBPDatabase<any>>;
 
@@ -26,10 +27,28 @@ export const initDB = () => {
             db.createObjectStore(STORE_SYNC_LEDGERS, { keyPath: 'id' });
           }
         }
+        if (oldVersion < 4) {
+          if (!db.objectStoreNames.contains(STORE_SETTINGS)) {
+            db.createObjectStore(STORE_SETTINGS);
+          }
+        }
       },
     });
   }
   return dbPromise;
+};
+
+export const getSetting = async (key: string): Promise<any> => {
+  const db = await initDB();
+  const value = await db.get(STORE_SETTINGS, key);
+  console.log(`[DB] Get Setting: ${key} =`, value);
+  return value;
+};
+
+export const saveSetting = async (key: string, value: any) => {
+  const db = await initDB();
+  console.log(`[DB] Save Setting: ${key} =`, value);
+  await db.put(STORE_SETTINGS, value, key);
 };
 
 export const getAllNotes = async (): Promise<Note[]> => {
@@ -75,6 +94,11 @@ export const saveProject = async (project: any) => {
 export const deleteProject = async (id: string) => {
   const db = await initDB();
   await db.delete(STORE_PROJECTS, id);
+};
+
+export const getProject = async (id: string): Promise<any | null> => {
+  const db = await initDB();
+  return db.get(STORE_PROJECTS, id);
 };
 
 // Sync Ledger methods

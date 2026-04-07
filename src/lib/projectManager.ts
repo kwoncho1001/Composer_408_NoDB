@@ -1,11 +1,9 @@
-import { db, auth } from '../firebase';
-import { collection, query, where, getDocs, addDoc, Timestamp } from 'firebase/firestore';
-import { Note, OperationType } from '../types';
+import { OperationType } from '../types';
 
 export interface ProjectBackup {
   name: string;
   githubSync: any;
-  notes: Note[];
+  notes: any[];
 }
 
 interface FirestoreErrorInfo {
@@ -27,21 +25,16 @@ interface FirestoreErrorInfo {
   }
 }
 
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth?.currentUser?.uid || 'local-guest',
-      email: auth?.currentUser?.email || 'guest@local',
-      emailVerified: auth?.currentUser?.emailVerified || false,
-      isAnonymous: auth?.currentUser?.isAnonymous || true,
-      tenantId: auth?.currentUser?.tenantId || '',
-      providerInfo: auth?.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
+      userId: 'local-guest',
+      email: 'guest@local',
+      emailVerified: false,
+      isAnonymous: true,
+      tenantId: '',
+      providerInfo: []
     },
     operationType,
     path

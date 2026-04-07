@@ -60,12 +60,13 @@ export const JourneyView: React.FC<JourneyViewProps> = ({ notes, onSelectNote })
                       )}
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                          {note.folder || 'General'}
+                          {note.noteType}
                         </span>
                         {note.priority && (
                           <span className={`text-[10px] font-bold px-2 py-1 rounded-md border ${
-                            note.priority === 'P1' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' :
-                            note.priority === 'P2' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' :
+                            note.priority === '1st' ? 'bg-rose-500/10 text-rose-500 border-rose-500/20' :
+                            note.priority === '2nd' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' :
+                            note.priority === '3rd' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' :
                             'bg-slate-500/10 text-slate-500 border-slate-500/20'
                           }`}>
                             {note.priority}

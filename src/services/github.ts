@@ -18,6 +18,32 @@ export const fetchRepoTree = async (repoUrl: string, branch: string = 'main') =>
   return data.tree; // Array of { path, mode, type, sha, url }
 };
 
+export const getCurrentCommitSHA = async (repoUrl: string, branch: string = 'main') => {
+  const [owner, repo] = extractOwnerRepo(repoUrl);
+  if (!owner || !repo) throw new Error("Invalid GitHub URL");
+
+  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits/${branch}`, {
+    headers: getHeaders()
+  });
+  if (!response.ok) throw new Error("Failed to fetch latest commit");
+  
+  const data = await response.json();
+  return data.sha;
+};
+
+export const getChangedFiles = async (repoUrl: string, oldSHA: string, newSHA: string) => {
+  const [owner, repo] = extractOwnerRepo(repoUrl);
+  if (!owner || !repo) throw new Error("Invalid GitHub URL");
+
+  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/compare/${oldSHA}...${newSHA}`, {
+    headers: getHeaders()
+  });
+  if (!response.ok) throw new Error("Failed to compare commits");
+  
+  const data = await response.json();
+  return data.files.map((f: any) => f.filename);
+};
+
 export const fetchFileContent = async (repoUrl: string, path: string) => {
   const [owner, repo] = extractOwnerRepo(repoUrl);
   const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {

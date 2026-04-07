@@ -1,9 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../firebase';
 
 interface AuthContextType {
-  user: User | null | { uid: string; displayName: string; email: string; photoURL: string | null; isGuest: boolean };
+  user: { uid: string; displayName: string; email: string; photoURL: string | null; isGuest: boolean } | null;
   loading: boolean;
 }
 
@@ -16,25 +14,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!auth) {
-      // Local-only mode: provide a guest user
-      setUser({
-        uid: 'local-guest',
-        displayName: 'Local Guest',
-        email: 'guest@local',
-        photoURL: null,
-        isGuest: true
-      });
-      setLoading(false);
-      return;
-    }
-
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoading(false);
+    // Local-only mode: provide a guest user
+    setUser({
+      uid: 'local-guest',
+      displayName: 'Local Guest',
+      email: 'guest@local',
+      photoURL: null,
+      isGuest: true
     });
-
-    return () => unsubscribe();
+    setLoading(false);
   }, []);
 
   return (

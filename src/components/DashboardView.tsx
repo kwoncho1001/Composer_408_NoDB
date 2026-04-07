@@ -215,7 +215,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
                   childNoteIds: [],
                   summary: logic.summary,
                   status: 'Planned',
-                  priority: 'P3',
+                  priority: '3rd',
                   createdAt: Date.now(),
                   updatedAt: Date.now()
                 } as any);
@@ -232,7 +232,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
               childNoteIds: moduleChildIds,
               summary: mod.summary,
               status: 'Planned',
-              priority: 'P3',
+              priority: '3rd',
               createdAt: Date.now(),
               updatedAt: Date.now()
             } as any);
@@ -249,7 +249,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
           childNoteIds: domainChildIds,
           summary: domain.summary,
           status: 'Planned',
-          priority: 'P3',
+          priority: '3rd',
           createdAt: Date.now(),
           updatedAt: Date.now()
         } as any);
@@ -323,9 +323,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'P1': return 'text-rose-500 bg-rose-500/10 border-rose-500/20';
-      case 'P2': return 'text-amber-500 bg-amber-500/10 border-amber-500/20';
-      case 'P3': return 'text-slate-500 bg-slate-500/10 border-slate-500/20';
+      case '1st': return 'text-rose-500 bg-rose-500/10 border-rose-500/20';
+      case '2nd': return 'text-amber-500 bg-amber-500/10 border-amber-500/20';
+      case '3rd': return 'text-blue-500 bg-blue-500/10 border-blue-500/20';
       default: return 'text-muted-foreground/60 bg-muted border-transparent';
     }
   };
@@ -362,7 +362,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
     setIsEstimatingCost(true);
     setShowCostModal(true);
     try {
-      const targetNotes = [...modules, ...logics].filter(n => n.priority === 'P1' || n.priority === 'P2');
+      const targetNotes = [...modules, ...logics].filter(n => n.priority === '1st' || n.priority === '2nd');
       const estimate = await estimateProjectCost(targetNotes);
       setCostEstimate(estimate);
     } catch (error) {

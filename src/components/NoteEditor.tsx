@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, collection, arrayUnion, arrayRemove } from 'firebase/firestore';
-import { db, auth } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Note, NoteType, NoteStatus, NotePriority, OperationType, CSuiteEvaluation } from '../types';
 import { handleFirestoreError } from '../lib/utils';
-import { Trash2, Save, Eye, Edit3, Sparkles, Loader2, AlertTriangle, CheckCircle2, FileWarning, PanelTop, Users, Code2, Megaphone, DollarSign } from 'lucide-react';
+import { Trash2, Save, Eye, Edit3, Sparkles, Loader2, AlertTriangle, CheckCircle2, FileWarning, PanelTop, Users, Code2, Megaphone, DollarSign, Info, Layers, History, Fingerprint } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -26,8 +24,8 @@ const getCleanSummary = (summary: string | undefined) => {
 export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: string | null, projectId: string | null, onSaved: () => void, onDeleted?: () => void }) => {
   const { user } = useAuth();
   const [note, setNote] = useState<Partial<Note>>({
-    title: '', summary: '', body: '', folder: '/', noteType: 'Domain', status: 'Planned', priority: 'C',
-    parentNoteIds: [], childNoteIds: [], relatedNoteIds: []
+    title: '', summary: '', body: '', noteType: 'Domain', status: 'Planned', priority: '3rd',
+    parentNoteIds: [], childNoteIds: []
   });
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -55,8 +53,8 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
     setConflictResolutionGuide(null);
     if (!noteId || noteId === 'new') {
       setNote({
-        title: '', summary: '', body: '', folder: '/', noteType: 'Domain', status: 'Planned', priority: 'C',
-        parentNoteIds: [], childNoteIds: [], relatedNoteIds: []
+        title: '', summary: '', body: '', noteType: 'Domain', status: 'Planned', priority: '3rd',
+        parentNoteIds: [], childNoteIds: []
       });
       return;
     }
@@ -74,11 +72,9 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
           data.title = data.title || '';
           data.summary = data.summary || '';
           data.body = data.body || '';
-          data.folder = data.folder || '/';
           // Ensure array fields are not undefined
           data.parentNoteIds = data.parentNoteIds || [];
           data.childNoteIds = data.childNoteIds || [];
-          data.relatedNoteIds = data.relatedNoteIds || [];
 
           // Self-healing: remove child IDs that don't exist or don't have this note as parent
           const validChildIds = allNotes
@@ -220,13 +216,13 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
   };
 
   const getFilePathForConflict = async () => {
-    let filePath = note?.originPath || note?.folder;
+    let filePath = note?.originPath;
     if (!filePath || filePath === '/') {
       if (note?.childNoteIds && note.childNoteIds.length > 0) {
         const allNotes = await dbManager.getAllNotes();
         const childSnapshots = allNotes.filter(n => note.childNoteIds?.includes(n.id) && n.noteType === 'Snapshot');
         if (childSnapshots.length > 0) {
-          filePath = childSnapshots[0].originPath || childSnapshots[0].folder;
+          filePath = childSnapshots[0].originPath;
         }
       }
     }
@@ -240,9 +236,9 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
       const filePath = await getFilePathForConflict();
       if (!filePath || filePath === '/') throw new Error("Could not determine the source file path for this logic.");
 
-      const projectDoc = await getDoc(doc(db, 'projects', projectId));
-      if (!projectDoc.exists()) throw new Error("Project not found");
-      const repoUrl = projectDoc.data().repoUrl;
+      const project = await dbManager.getProject(projectId);
+      if (!project) throw new Error("Project not found");
+      const repoUrl = project.repoUrl;
       
       const fileContent = await fetchFileContent(repoUrl, filePath);
       const analyzed = await analyzeLogicUnit(note.title || '', fileContent);
@@ -283,9 +279,9 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
       const filePath = await getFilePathForConflict();
       if (!filePath || filePath === '/') throw new Error("Could not determine the source file path for this logic.");
 
-      const projectDoc = await getDoc(doc(db, 'projects', projectId));
-      if (!projectDoc.exists()) throw new Error("Project not found");
-      const repoUrl = projectDoc.data().repoUrl;
+      const project = await dbManager.getProject(projectId);
+      if (!project) throw new Error("Project not found");
+      const repoUrl = project.repoUrl;
       
       const fileContent = await fetchFileContent(repoUrl, filePath);
       const guide = await generateFixGuide(note as Note, fileContent);
@@ -473,23 +469,16 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
 
       <div className="p-4 sm:p-8 space-y-6 sm:space-y-12">
         {showMetadata && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
-            {/* Left Column: Core Configuration & Version Control */}
-            <div className="space-y-6 sm:space-y-8">
-            {/* Core Configuration */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
+            {/* A. 노트 정보 */}
             <section className="bg-transparent sm:bg-muted/10 border-0 sm:border border-border/50 rounded-none sm:rounded-3xl p-0 sm:p-8 pl-4 sm:pl-8 space-y-4 sm:space-y-6 relative overflow-hidden group">
               <div className="absolute top-0 left-0 w-1 h-full bg-green-500/50 group-hover:bg-green-500 transition-colors"></div>
               <h3 className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.3em] flex items-center gap-3">
-                Core Configuration
+                <Info size={14} className="text-green-500" />
+                A. 노트 정보
               </h3>
-              <div className="grid grid-cols-2 gap-3 sm:gap-6">
-                <div className="col-span-2">
-                  <label className="block text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase mb-1 sm:mb-2 tracking-widest">UID</label>
-                  <div className="w-full bg-background/30 border border-border rounded-xl p-2 sm:p-3 text-[10px] sm:text-xs font-mono font-bold text-muted-foreground truncate">
-                    {note.id || 'NEW_ENTRY'}
-                  </div>
-                </div>
-                <div className="col-span-2 sm:col-span-1">
+              <div className="space-y-4">
+                <div>
                   <label className="block text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase mb-1 sm:mb-2 tracking-widest">Type</label>
                   <select 
                     value={note.noteType} 
@@ -502,103 +491,106 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
                     <option value="Snapshot">Snapshot</option>
                   </select>
                 </div>
-                <div className="col-span-1">
-                  <label className="block text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase mb-1 sm:mb-2 tracking-widest">Status</label>
-                  <select 
-                    value={note.status} 
-                    onChange={e => {
-                      const newStatus = e.target.value as NoteStatus;
-                      const updates: any = { status: newStatus };
-                      if (newStatus === 'Done') updates.priority = 'Done';
-                      updateNote(updates);
-                    }}
-                    className="w-full bg-background/50 border border-border rounded-xl p-2 sm:p-3 text-xs font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all appearance-none cursor-pointer"
-                  >
-                    <option value="Planned">Planned</option>
-                    <option value="Done">Done</option>
-                    <option value="Conflict">Conflict</option>
-                  </select>
-                </div>
-                <div className="col-span-1">
-                  <label className="block text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase mb-1 sm:mb-2 tracking-widest">Priority</label>
-                  <select 
-                    value={note.priority || 'P3'} 
-                    onChange={e => updateNote({priority: e.target.value as NotePriority})}
-                    disabled={note.status === 'Done'}
-                    className={`w-full bg-background/50 border border-border rounded-xl p-2 sm:p-3 text-xs font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all appearance-none cursor-pointer ${note.status === 'Done' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <option value="P1">P1 - Must-have</option>
-                    <option value="P2">P2 - Nice-to-have</option>
-                    <option value="P3">P3 - Backlog</option>
-                    <option value="Done">Done</option>
-                  </select>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase mb-1 sm:mb-2 tracking-widest">Status</label>
+                    <select 
+                      value={note.status} 
+                      onChange={e => {
+                        const newStatus = e.target.value as NoteStatus;
+                        const updates: any = { status: newStatus };
+                        if (newStatus === 'Done') updates.priority = 'Done';
+                        updateNote(updates);
+                      }}
+                      className="w-full bg-background/50 border border-border rounded-xl p-2 sm:p-3 text-xs font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all appearance-none cursor-pointer"
+                    >
+                      <option value="Planned">Planned</option>
+                      <option value="Done">Done</option>
+                      <option value="Conflict">Conflict</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase mb-1 sm:mb-2 tracking-widest">Priority</label>
+                    <select 
+                      value={note.priority || '3rd'} 
+                      onChange={e => updateNote({priority: e.target.value as NotePriority})}
+                      disabled={note.status === 'Done'}
+                      className={`w-full bg-background/50 border border-border rounded-xl p-2 sm:p-3 text-xs font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all appearance-none cursor-pointer ${note.status === 'Done' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <option value="1st">1st Priority</option>
+                      <option value="2nd">2nd Priority</option>
+                      <option value="3rd">3rd Priority</option>
+                      <option value="Done">Done</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             </section>
 
-            {/* Version Control */}
+            {/* B. 노트 계층 */}
             <section className="bg-transparent sm:bg-muted/10 border-0 sm:border border-border/50 rounded-none sm:rounded-3xl p-0 sm:p-8 pl-4 sm:pl-8 space-y-4 sm:space-y-6 relative overflow-hidden group">
-              <div className="absolute top-0 left-0 w-1 h-full bg-primary/50 group-hover:bg-primary transition-colors"></div>
-              <h3 className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.3em] flex items-center gap-3">
-                Version Control
-              </h3>
-              <div className="space-y-3 sm:space-y-4 text-xs">
-                <div className="flex flex-col gap-1 sm:gap-1.5 py-2 sm:py-3 border-b border-border/30">
-                  <span className="text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase tracking-widest">Origin Path</span>
-                  <span className="font-mono text-xs text-primary break-all">{note.originPath || note.folder || 'LOCAL_ONLY'}</span>
-                </div>
-                <div className="flex flex-col gap-1 sm:gap-1.5 py-2 sm:py-3 border-b border-border/30">
-                  <span className="text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase tracking-widest">Commit SHA</span>
-                  <span className="font-mono text-xs text-muted-foreground break-all">{note.sha || 'UNCOMMITTED'}</span>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-2 sm:py-3 gap-1 sm:gap-0">
-                  <span className="text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase tracking-widest">Last Sync</span>
-                  <span className="text-xs font-bold font-mono text-foreground">{formatTimestamp(note.lastUpdated)}</span>
-                </div>
-              </div>
-            </section>
-          </div>
-
-          {/* Right Column: System Architecture */}
-          <div className="h-full">
-            <section className="bg-transparent sm:bg-muted/10 border-0 sm:border border-border/50 rounded-none sm:rounded-3xl p-0 sm:p-8 pl-4 sm:pl-8 space-y-4 sm:space-y-6 relative overflow-hidden group h-full">
               <div className="absolute top-0 left-0 w-1 h-full bg-purple-500/50 group-hover:bg-purple-500 transition-colors"></div>
               <h3 className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.3em] flex items-center gap-3">
-                System Architecture
+                <Layers size={14} className="text-purple-500" />
+                B. 노트 계층
               </h3>
-              <div className="space-y-4 sm:space-y-6">
+              <div className="space-y-4">
                 <div>
                   <label className="block text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase mb-1 sm:mb-2 tracking-widest">Parent Nodes</label>
                   <textarea 
                     value={note.parentNoteIds?.join(', ') || ''} 
                     onChange={e => updateNote({parentNoteIds: e.target.value.split(',').map(s => s.trim()).filter(Boolean)})}
-                    className="w-full bg-background/50 border border-border rounded-xl p-3 sm:p-3 text-xs font-mono focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none min-h-[44px]"
+                    className="w-full bg-background/50 border border-border rounded-xl p-2 sm:p-3 text-xs font-mono focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none min-h-[44px]"
                     placeholder="NODE_ID_1, NODE_ID_2..."
-                    rows={2}
+                    rows={1}
                   />
                 </div>
                 <div>
                   <label className="block text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase mb-1 sm:mb-2 tracking-widest">Child Nodes</label>
-                  <div className="w-full bg-background/30 border border-border border-dashed rounded-xl p-3 sm:p-3 text-xs font-mono text-muted-foreground min-h-[44px] flex flex-wrap gap-2">
+                  <div className="w-full bg-background/30 border border-border border-dashed rounded-xl p-2 sm:p-3 text-[10px] font-mono text-muted-foreground min-h-[44px] flex flex-wrap gap-1">
                     {note.childNoteIds?.length ? note.childNoteIds.map(id => (
-                      <span key={id} className="bg-muted px-2 py-1 rounded border border-border/50 text-foreground font-bold break-all">{id}</span>
-                    )) : 'NO_CHILD_NODES_DETECTED'}
+                      <span key={id} className="bg-muted px-1.5 py-0.5 rounded border border-border/50 text-foreground font-bold truncate max-w-full">{id}</span>
+                    )) : 'NO_CHILDREN'}
                   </div>
                 </div>
                 <div>
-                  <label className="block text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase mb-1 sm:mb-2 tracking-widest">Related Nodes</label>
-                  <textarea 
-                    value={note.relatedNoteIds?.join(', ') || ''} 
-                    onChange={e => updateNote({relatedNoteIds: e.target.value.split(',').map(s => s.trim()).filter(Boolean)})}
-                    className="w-full bg-background/50 border border-border rounded-xl p-3 sm:p-3 text-xs font-mono focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none min-h-[44px]"
-                    placeholder="NODE_ID_1, NODE_ID_2..."
-                    rows={2}
-                  />
+                  <label className="block text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase mb-1 sm:mb-2 tracking-widest">Origin Path</label>
+                  <div className="w-full bg-background/30 border border-border rounded-xl p-2 sm:p-3 text-[10px] font-mono font-bold text-primary truncate">
+                    {note.originPath || 'LOCAL_ONLY'}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* C. 노트 버전 */}
+            <section className="bg-transparent sm:bg-muted/10 border-0 sm:border border-border/50 rounded-none sm:rounded-3xl p-0 sm:p-8 pl-4 sm:pl-8 space-y-4 sm:space-y-6 relative overflow-hidden group">
+              <div className="absolute top-0 left-0 w-1 h-full bg-primary/50 group-hover:bg-primary transition-colors"></div>
+              <h3 className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.3em] flex items-center gap-3">
+                <History size={14} className="text-primary" />
+                C. 노트 버전
+              </h3>
+              <div className="space-y-3 text-[10px]">
+                <div className="flex flex-col gap-1 py-1.5 border-b border-border/30">
+                  <span className="font-black text-muted-foreground/70 uppercase tracking-widest">Last Updated</span>
+                  <span className="font-bold font-mono text-foreground">{formatTimestamp(note.lastUpdated)}</span>
+                </div>
+                <div className="flex flex-col gap-1 py-1.5 border-b border-border/30">
+                  <span className="font-black text-muted-foreground/70 uppercase tracking-widest flex items-center gap-1">
+                    <Fingerprint size={10} /> Commit SHA
+                  </span>
+                  <span className="font-mono text-muted-foreground break-all">{note.sha || 'UNCOMMITTED'}</span>
+                </div>
+                <div className="flex flex-col gap-1 py-1.5 border-b border-border/30">
+                  <span className="font-black text-muted-foreground/70 uppercase tracking-widest">Content Hash</span>
+                  <span className="font-mono text-muted-foreground break-all">{note.contentHash || 'N/A'}</span>
+                </div>
+                <div className="flex flex-col gap-1 py-1.5">
+                  <span className="font-black text-muted-foreground/70 uppercase tracking-widest">Embedding Hash</span>
+                  <span className="font-mono text-muted-foreground break-all">{note.embeddingHash || 'N/A'}</span>
                 </div>
               </div>
             </section>
           </div>
-        </div>
         )}
 
         {/* Content Area */}

@@ -132,7 +132,7 @@ ${fileContent}
           type: Type.OBJECT,
           properties: {
             title: { type: Type.STRING, description: "로직 단위의 이름 (함수명, 클래스명 등)" },
-            priority: { type: Type.STRING, description: "우선순위: A, B, C, 또는 Done" }
+            priority: { type: Type.STRING, description: "우선순위: 1st, 2nd, 3rd, 또는 Done" }
           },
           required: ["title", "priority"]
         }
@@ -708,17 +708,17 @@ ${constraint}
 ${notes.map(n => `ID: ${n.id} | Type: ${n.noteType} | Title: ${n.title} | Summary: ${n.summary}`).join('\n')}
 
 [우선순위 분류 기준]
-- P1 (Must-have): 제약 조건을 맞추기 위해 절대적으로 필수적인 핵심 기능. 없으면 서비스가 성립하지 않음.
-- P2 (Nice-to-have): 있으면 좋지만, 당장 런칭에는 제외해도 되는 기능.
-- P3 (Backlog): 나중에 여유가 될 때 개발할 기능.
+- 1st (Must-have): 제약 조건을 맞추기 위해 절대적으로 필수적인 핵심 기능. 없으면 서비스가 성립하지 않음.
+- 2nd (Nice-to-have): 있으면 좋지만, 당장 런칭에는 제외해도 되는 기능.
+- 3rd (Backlog): 나중에 여유가 될 때 개발할 기능.
 
-각 ID에 대해 새로운 우선순위(P1, P2, P3)와 그 이유(1문장)를 JSON 배열로 반환하세요.
+각 ID에 대해 새로운 우선순위(1st, 2nd, 3rd)와 그 이유(1문장)를 JSON 배열로 반환하세요.
 반드시 아래 JSON 형식으로만 응답하세요:
 {
   "scoping": [
     {
       "id": "노트 ID",
-      "priority": "P1",
+      "priority": "1st",
       "reason": "우선순위를 이렇게 설정한 이유 (비즈니스 관점)"
     }
   ]
@@ -758,7 +758,7 @@ ${notes.map(n => `ID: ${n.id} | Type: ${n.noteType} | Title: ${n.title} | Summar
 
   try {
     const jsonStr = response.text.trim();
-    return JSON.parse(jsonStr).scoping as { id: string, priority: 'P1' | 'P2' | 'P3', reason: string }[];
+    return JSON.parse(jsonStr).scoping as { id: string, priority: '1st' | '2nd' | '3rd', reason: string }[];
   } catch (e) {
     console.error("Failed to parse MVP scoping JSON", e);
     throw new Error("Invalid JSON format from AI.");

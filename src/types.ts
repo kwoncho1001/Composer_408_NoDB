@@ -1,6 +1,6 @@
 export type NoteType = 'Domain' | 'Module' | 'Logic' | 'Snapshot';
 export type NoteStatus = 'Planned' | 'Done' | 'Conflict';
-export type NotePriority = 'P1' | 'P2' | 'P3' | 'A' | 'B' | 'C' | 'Done';
+export type NotePriority = '1st' | '2nd' | '3rd' | 'Done';
 export type LensType = 'Feature' | 'Snapshot';
 
 export interface ConflictDetail {
@@ -72,15 +72,16 @@ export interface Note {
   flow?: string;
   io?: string;
   body: string;
-  folder: string;
   noteType: NoteType;
   status: NoteStatus;
   priority: NotePriority;
   lastUpdated: any; // Firestore Timestamp
   parentNoteIds: string[];
   childNoteIds: string[];
-  relatedNoteIds: string[];
   originPath?: string;
+  startLine?: number;
+  endLine?: number;
+  codeSnippet?: string;
   sha?: string;
   contentHash?: string;
   embedding?: number[];

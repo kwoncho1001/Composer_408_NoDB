@@ -1,6 +1,5 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { auth } from "../firebase";
 import { OperationType, FirestoreErrorInfo } from "../types";
 
 export function cn(...inputs: ClassValue[]) {
@@ -18,22 +17,17 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth?.currentUser?.uid || 'local-guest',
-      email: auth?.currentUser?.email || 'guest@local',
-      emailVerified: auth?.currentUser?.emailVerified || false,
-      isAnonymous: auth?.currentUser?.isAnonymous || true,
-      tenantId: auth?.currentUser?.tenantId || '',
-      providerInfo: auth?.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
+      userId: 'local-guest',
+      email: 'guest@local',
+      emailVerified: false,
+      isAnonymous: true,
+      tenantId: '',
+      providerInfo: []
     },
     operationType,
     path
   }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  console.error('Local Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
 

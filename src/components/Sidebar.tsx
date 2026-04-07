@@ -1,10 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { collection, onSnapshot, query, where, deleteDoc, doc, addDoc, serverTimestamp, getDocs, writeBatch } from 'firebase/firestore';
-import { db, auth } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Note, Project, OperationType, LensType } from '../types';
 import { handleFirestoreError } from '../lib/utils';
-import { Folder, FileText, Plus, CheckSquare, Trash2, PanelLeftClose, ChevronDown, Check, FolderGit2, Circle, CheckCircle2, RefreshCw, Sparkles, FoldVertical, UnfoldVertical } from 'lucide-react';
+import { Folder, FileText, Plus, CheckSquare, Trash2, PanelLeftClose, ChevronDown, Check, FolderGit2, Circle, CheckCircle2, RefreshCw, Sparkles, FoldVertical, UnfoldVertical, FileEdit, X } from 'lucide-react';
 import * as dbManager from '../services/dbManager';
 import { generateInitialBlueprint } from '../services/gemini';
 
@@ -39,8 +37,21 @@ export const Sidebar = ({
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [projectToDeleteId, setProjectToDeleteId] = useState<string | null>(null);
+  const [projectToRenameId, setProjectToRenameId] = useState<string | null>(null);
+  const [renamingProjectName, setRenamingProjectName] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [collapsedIds, setCollapsedIds] = useState<string[]>([]);
+
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  const handleToggleExpand = () => {
+    if (isExpanded) {
+      handleCollapseAll();
+    } else {
+      handleExpandAll();
+    }
+    setIsExpanded(!isExpanded);
+  };
 
   const handleCollapseAll = () => {
     const allNoteIds = notes.map(n => n.id);
@@ -98,31 +109,15 @@ export const Sidebar = ({
   }, [onSelectProject, selectedProjectId]);
 
   useEffect(() => {
-    if (!auth || !user || !db) {
-      // Local-only mode: fetch projects from IndexedDB
-      const loadLocalProjects = async () => {
-        const localProjects = await dbManager.getAllProjects();
-        setProjects(localProjects);
-        if (localProjects.length > 0 && !selectedProjectIdRef.current) {
-          onSelectProjectRef.current(localProjects[0].id);
-        }
-      };
-      loadLocalProjects();
-      return;
-    }
-    const q = query(collection(db, 'projects'), where('uid', '==', user.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedProjects = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Project));
-      setProjects(fetchedProjects);
-      if (fetchedProjects.length > 0 && !selectedProjectIdRef.current) {
-        onSelectProjectRef.current(fetchedProjects[0].id);
-      } else if (fetchedProjects.length === 0) {
-        onSelectProjectRef.current(null);
+    // Local-only mode: fetch projects from IndexedDB
+    const loadLocalProjects = async () => {
+      const localProjects = await dbManager.getAllProjects();
+      setProjects(localProjects);
+      if (localProjects.length > 0 && !selectedProjectIdRef.current) {
+        onSelectProjectRef.current(localProjects[0].id);
       }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'projects');
-    });
-    return () => unsubscribe();
+    };
+    loadLocalProjects();
   }, [user?.uid]);
 
   const handleCreateProject = async (e: React.FormEvent) => {
@@ -140,13 +135,6 @@ export const Sidebar = ({
         createdAt: new Date().toISOString()
       };
 
-      if (db) {
-        await addDoc(collection(db, 'projects'), {
-          ...newProject,
-          createdAt: serverTimestamp()
-        });
-      }
-      
       // Always save locally
       await dbManager.saveProject(newProject);
 
@@ -155,14 +143,10 @@ export const Sidebar = ({
       setNewProjectName('');
       setIsProjectMenuOpen(false);
       
-      // Trigger local refresh if in local mode
-      if (!db) {
-        const localProjects = await dbManager.getAllProjects();
-        setProjects(localProjects);
-      }
+      const localProjects = await dbManager.getAllProjects();
+      setProjects(localProjects);
     } catch (error) {
-      if (db) handleFirestoreError(error, OperationType.CREATE, 'projects');
-      else console.error("Error creating local project", error);
+      console.error("Error creating local project", error);
       setIsCreatingProject(false);
     }
   };
@@ -172,53 +156,11 @@ export const Sidebar = ({
     setIsDeletingProject(true);
 
     try {
-      if (db) {
-        // 1. Delete all notes for this project (Remote)
-        const notesQuery = query(
-          collection(db, 'notes'), 
-          where('uid', '==', user.uid),
-          where('projectId', '==', projectId)
-        );
-        const notesSnap = await getDocs(notesQuery);
-        
-        let batch = writeBatch(db);
-        let count = 0;
-        for (const d of notesSnap.docs) {
-          batch.delete(doc(db, 'notes', d.id));
-          count++;
-          if (count >= 450) {
-            await batch.commit();
-            batch = writeBatch(db);
-            count = 0;
-          }
-        }
-        if (count > 0) await batch.commit();
-      }
-
       // Delete all notes for this project (Local)
       const allLocalNotes = await dbManager.getAllNotes();
       const localNotesToDelete = allLocalNotes.filter(n => n.projectId === projectId).map(n => n.id);
       if (localNotesToDelete.length > 0) {
         await dbManager.bulkDeleteNotes(localNotesToDelete);
-      }
-
-      if (db) {
-        // 2. Delete sync ledger
-        const ledgerQuery = query(
-          collection(db, 'syncLedgers'), 
-          where('uid', '==', user.uid),
-          where('projectId', '==', projectId)
-        );
-        const ledgerSnap = await getDocs(ledgerQuery);
-        for (const d of ledgerSnap.docs) {
-          await deleteDoc(doc(db, 'syncLedgers', d.id));
-        }
-
-        // Delete sync_manifests
-        await deleteDoc(doc(db, 'sync_manifests', projectId));
-
-        // 3. Delete project (Remote)
-        await deleteDoc(doc(db, 'projects', projectId));
       }
 
       // Delete project (Local)
@@ -235,8 +177,7 @@ export const Sidebar = ({
       const localProjects = await dbManager.getAllProjects();
       setProjects(localProjects);
     } catch (error) {
-      if (db) handleFirestoreError(error, OperationType.DELETE, `projects/${projectId}`);
-      else console.error("Error deleting local project", error);
+      console.error("Error deleting local project", error);
     } finally {
       setIsDeletingProject(false);
     }
@@ -256,6 +197,22 @@ export const Sidebar = ({
       if (onNotesChanged) onNotesChanged();
     } catch (error) {
       console.error("Error bulk deleting notes", error);
+    }
+  };
+
+  const handleRenameProject = async (projectId: string) => {
+    if (!renamingProjectName.trim() || !user) return;
+    try {
+      const project = await dbManager.getProject(projectId);
+      if (project) {
+        await dbManager.saveProject({ ...project, name: renamingProjectName.trim() });
+        setProjectToRenameId(null);
+        setRenamingProjectName('');
+        const localProjects = await dbManager.getAllProjects();
+        setProjects(localProjects);
+      }
+    } catch (error) {
+      console.error("Error renaming project", error);
     }
   };
 
@@ -532,29 +489,66 @@ export const Sidebar = ({
                   <div className="max-h-60 overflow-y-auto p-1">
                     {projects.map(p => (
                       <div key={p.id} className="group/project relative">
-                        <button
-                          onClick={() => {
-                            onSelectProject(p.id);
-                            setIsProjectMenuOpen(false);
-                            setIsCreatingProject(false);
-                          }}
-                          className={`w-full text-left px-4 py-2.5 text-sm rounded-xl flex items-center justify-between transition-colors ${
-                            p.id === selectedProjectId ? 'bg-primary/10 text-primary font-semibold' : 'hover:bg-accent text-muted-foreground hover:text-foreground'
-                          }`}
-                        >
-                          <span className="truncate pr-6">{p.name}</span>
-                          {p.id === selectedProjectId && <Check size={14} />}
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setProjectToDeleteId(p.id);
-                          }}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-muted-foreground/20 group-hover/project:text-destructive hover:bg-destructive/10 rounded-lg transition-all"
-                          title="Delete Project"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        {projectToRenameId === p.id ? (
+                          <div className="flex items-center gap-2 px-4 py-2.5">
+                            <input
+                              type="text"
+                              value={renamingProjectName || ''}
+                              onChange={(e) => setRenamingProjectName(e.target.value)}
+                              className="flex-1 px-2 py-1 text-sm bg-background border border-border rounded-lg outline-none focus:ring-2 focus:ring-primary/20"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleRenameProject(p.id);
+                                if (e.key === 'Escape') setProjectToRenameId(null);
+                              }}
+                            />
+                            <button onClick={() => handleRenameProject(p.id)} className="p-1 text-primary hover:bg-primary/10 rounded-lg">
+                              <Check size={14} />
+                            </button>
+                            <button onClick={() => setProjectToRenameId(null)} className="p-1 text-muted-foreground hover:bg-muted rounded-lg">
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => {
+                                onSelectProject(p.id);
+                                setIsProjectMenuOpen(false);
+                                setIsCreatingProject(false);
+                              }}
+                              className={`w-full text-left px-4 py-2.5 text-sm rounded-xl flex items-center justify-between transition-colors ${
+                                p.id === selectedProjectId ? 'bg-primary/10 text-primary font-semibold' : 'hover:bg-accent text-muted-foreground hover:text-foreground'
+                              }`}
+                            >
+                              <span className="truncate pr-6">{p.name}</span>
+                              {p.id === selectedProjectId && <Check size={14} />}
+                            </button>
+                            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover/project:opacity-100 transition-opacity">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setProjectToRenameId(p.id);
+                                  setRenamingProjectName(p.name);
+                                }}
+                                className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-all"
+                                title="Rename Project"
+                              >
+                                <FileEdit size={14} />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setProjectToDeleteId(p.id);
+                                }}
+                                className="p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-all"
+                                title="Delete Project"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -631,20 +625,12 @@ export const Sidebar = ({
       <div className="px-5 py-3 border-b border-border flex justify-end items-center bg-muted/20">
         <div className="flex gap-1.5">
           <button 
-            onClick={handleExpandAll} 
+            onClick={handleToggleExpand} 
             className="p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground rounded-lg transition-all" 
-            title="Expand All"
+            title={isExpanded ? "Collapse All" : "Expand All"}
             disabled={!selectedProjectId}
           >
-            <UnfoldVertical size={16} className={!selectedProjectId ? 'opacity-30' : ''} />
-          </button>
-          <button 
-            onClick={handleCollapseAll} 
-            className="p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground rounded-lg transition-all" 
-            title="Collapse All"
-            disabled={!selectedProjectId}
-          >
-            <FoldVertical size={16} className={!selectedProjectId ? 'opacity-30' : ''} />
+            {isExpanded ? <FoldVertical size={16} /> : <UnfoldVertical size={16} />}
           </button>
           <div className="w-px h-4 bg-border mx-1 self-center" />
           <button 
@@ -654,14 +640,6 @@ export const Sidebar = ({
             disabled={!selectedProjectId}
           >
             <CheckSquare size={16} className={!selectedProjectId ? 'opacity-30' : ''} />
-          </button>
-          <button 
-            onClick={() => onSelectNote('new')} 
-            className="p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground rounded-lg transition-all" 
-            title="New Note"
-            disabled={!selectedProjectId}
-          >
-            <Plus size={18} className={!selectedProjectId ? 'opacity-30' : ''} />
           </button>
         </div>
       </div>
@@ -703,13 +681,6 @@ export const Sidebar = ({
           </div>
         )}
       </div>
-
-      {!db && (
-        <div className="p-3 border-t border-border bg-primary/5 text-[10px] font-bold text-primary flex items-center justify-center gap-2">
-          <Circle size={8} className="fill-primary animate-pulse" />
-          LOCAL-ONLY MODE (NO CLOUD SYNC)
-        </div>
-      )}
     </div>
   );
 };

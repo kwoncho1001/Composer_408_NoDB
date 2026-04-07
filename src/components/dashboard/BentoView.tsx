@@ -23,7 +23,7 @@ export const BentoView: React.FC<BentoViewProps> = ({
   const completedNotes = notes.filter(n => n.status === 'Done').length;
   const progress = totalNotes === 0 ? 0 : Math.round((completedNotes / totalNotes) * 100);
 
-  const p1Notes = notes.filter(n => n.priority === 'P1');
+  const firstPriorityNotes = notes.filter(n => n.priority === '1st');
   const conflictNotes = notes.filter(n => n.status === 'Conflict');
 
   return (
@@ -54,8 +54,8 @@ export const BentoView: React.FC<BentoViewProps> = ({
               <span className="text-[8px] md:text-[10px] uppercase tracking-widest mt-1">Conflicts</span>
             </div>
             <div className="bg-amber-500/10 text-amber-500 rounded-2xl p-2 md:p-4 border border-amber-500/20 flex flex-col items-center justify-center text-center">
-              <span className="text-xl md:text-2xl font-black">{p1Notes.length}</span>
-              <span className="text-[8px] md:text-[10px] uppercase tracking-widest mt-1">P1 Priority</span>
+              <span className="text-xl md:text-2xl font-black">{firstPriorityNotes.length}</span>
+              <span className="text-[8px] md:text-[10px] uppercase tracking-widest mt-1">1st Priority</span>
             </div>
           </div>
         </div>

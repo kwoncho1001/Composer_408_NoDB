@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { CoFounderProvider } from './contexts/CoFounderContext';
-import { signInWithGoogle, logout } from './firebase';
 import { Sidebar } from './components/Sidebar';
 import { NoteEditor } from './components/NoteEditor';
 import { GitHubSync } from './components/GitHubSync';
@@ -29,7 +28,6 @@ import { syncNotes } from './services/syncManager';
 
 function MainApp() {
   const { user, loading: authLoading } = useAuth();
-  const [isSigningIn, setIsSigningIn] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [isLeftOpen, setIsLeftOpen] = useState(false);
@@ -63,16 +61,6 @@ function MainApp() {
     return 'dark';
   });
 
-  const handleSignIn = async () => {
-    if (isSigningIn) return;
-    setIsSigningIn(true);
-    try {
-      await signInWithGoogle();
-    } finally {
-      setIsSigningIn(false);
-    }
-  };
-
   const loadNotes = async () => {
     if (!selectedProjectId) {
       setProjectNotes([]);
@@ -87,7 +75,7 @@ function MainApp() {
     loadNotes();
 
     if (user && selectedProjectId) {
-      // Trigger background sync
+      // Trigger background sync (local only now)
       syncNotes(selectedProjectId, (updatedNotes) => {
         setProjectNotes(updatedNotes);
       }, user.uid).catch(err => {
@@ -157,13 +145,7 @@ function MainApp() {
           </div>
           <h1 className="text-4xl font-bold mb-3 tracking-tight">Compose</h1>
           <p className="text-muted-foreground mb-10 text-lg">Vibe coding blueprint & sync for solo developers.</p>
-          <button 
-            onClick={handleSignIn}
-            disabled={isSigningIn}
-            className="w-full py-4 bg-primary text-primary-foreground rounded-xl font-semibold hover:opacity-90 transition-all active:scale-[0.98] shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isSigningIn ? 'Signing in...' : 'Sign in with Google'}
-          </button>
+          <p className="text-sm text-muted-foreground">Initializing local environment...</p>
         </div>
       </div>
     );
@@ -264,13 +246,10 @@ function MainApp() {
                 />
                 <div className="text-right hidden lg:block">
                   <p className="text-xs font-bold leading-none group-hover:text-primary transition-colors">{user.displayName || 'Developer'}</p>
-                  <p className="text-[10px] text-muted-foreground/60 mt-0.5">{user.email}</p>
+                  <p className="text-[10px] text-muted-foreground/60 mt-0.5">Local Mode</p>
                 </div>
               </div>
               
-              <button onClick={logout} className="p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded-xl transition-all active:scale-95" title="Sign out">
-                <LogOut size={18} />
-              </button>
               <button 
                 onClick={() => toggleRightSidebar(!isRightOpen)}
                 className="p-2 text-muted-foreground hover:bg-muted rounded-xl transition-all active:scale-95"
