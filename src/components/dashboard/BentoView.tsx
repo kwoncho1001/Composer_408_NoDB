@@ -9,16 +9,17 @@ interface BentoViewProps {
   onAcceptNudge: (nudge: ProactiveNudge) => void;
   onSparringSubmit: (nudge: ProactiveNudge, response: string) => void;
   onRejectNudge: (nudgeId: string) => void;
-  onRerollAllNudges: () => void;
+  onRerollAllNudges: (mode?: 'auto' | 'keyword' | 'suggested') => void;
   onOpenAction: (action: string) => void;
 }
 
 export const BentoView: React.FC<BentoViewProps> = ({ 
   notes, onAcceptNudge, onSparringSubmit, onRejectNudge, onRerollAllNudges, onOpenAction 
 }) => {
-  const { nudges, isFetchingNudges, loadingNudgeTypes, applyingNudgeId } = useCoFounder();
+  const { nudges, isFetchingNudges, loadingNudgeTypes, applyingNudgeId, generationMode, setGenerationMode } = useCoFounder();
   const [sparringNudgeId, setSparringNudgeId] = React.useState<string | null>(null);
   const [sparringText, setSparringText] = React.useState("");
+  const [showGenerationMenu, setShowGenerationMenu] = React.useState(false);
   const totalNotes = notes.length;
   const completedNotes = notes.filter(n => n.status === 'Done').length;
   const progress = totalNotes === 0 ? 0 : Math.round((completedNotes / totalNotes) * 100);
@@ -90,14 +91,24 @@ export const BentoView: React.FC<BentoViewProps> = ({
               <h3 className="text-sm font-black uppercase tracking-widest text-primary flex items-center gap-2">
                 <Sparkles size={16} /> AI CO-FOUNDER INSIGHTS
               </h3>
-              <button 
-                onClick={onRerollAllNudges}
-                disabled={isFetchingNudges}
-                className="text-xs font-bold bg-primary/10 hover:bg-primary/20 text-primary px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all disabled:opacity-50"
-              >
-                <RefreshCw size={14} className={isFetchingNudges ? "animate-spin" : ""} />
-                {nudges.length > 0 ? "새로운 인사이트 뽑기" : "인사이트 생성하기"}
-              </button>
+              <div className="relative">
+                <button 
+                  onClick={() => setShowGenerationMenu(!showGenerationMenu)}
+                  disabled={isFetchingNudges}
+                  className="text-xs font-bold bg-primary/10 hover:bg-primary/20 text-primary px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all disabled:opacity-50"
+                >
+                  <RefreshCw size={14} className={isFetchingNudges ? "animate-spin" : ""} />
+                  {nudges.length > 0 ? "새로운 인사이트 뽑기" : "인사이트 생성하기"}
+                </button>
+                
+                {showGenerationMenu && (
+                  <div className="absolute top-full mt-2 right-0 bg-card border border-border rounded-xl shadow-xl z-20 p-2 w-48">
+                    <button onClick={() => { onRerollAllNudges('auto'); setShowGenerationMenu(false); }} className="w-full text-left px-3 py-2 text-xs font-bold hover:bg-muted rounded-lg">자동 생성</button>
+                    <button onClick={() => { onRerollAllNudges('keyword'); setShowGenerationMenu(false); }} className="w-full text-left px-3 py-2 text-xs font-bold hover:bg-muted rounded-lg">키워드 입력</button>
+                    <button onClick={() => { onRerollAllNudges('suggested'); setShowGenerationMenu(false); }} className="w-full text-left px-3 py-2 text-xs font-bold hover:bg-muted rounded-lg">키워드 생성 및 선택</button>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="w-full">
             {isFetchingNudges && nudges.length === 0 ? (
@@ -175,9 +186,9 @@ export const BentoView: React.FC<BentoViewProps> = ({
                               className="w-full bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                             >
                               {applyingNudgeId === nudge.id ? (
-                                <><Loader2 size={14} className="animate-spin" /> 구체화 중...</>
+                                <><Loader2 size={14} className="animate-spin" /> 처리 중...</>
                               ) : (
-                                <>🛠️ 아키텍처에 추가</>
+                                <>✅ 적용하기</>
                               )}
                             </button>
                             <div className="flex gap-2">
@@ -280,9 +291,9 @@ export const BentoView: React.FC<BentoViewProps> = ({
                               className="w-full bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold py-2.5 rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                             >
                               {applyingNudgeId === nudge.id ? (
-                                <><Loader2 size={14} className="animate-spin" /> 구체화 중...</>
+                                <><Loader2 size={14} className="animate-spin" /> 처리 중...</>
                               ) : (
-                                <>🔥 오, 자극되네! (바로 적용)</>
+                                <>✅ 적용하기</>
                               )}
                             </button>
                             <div className="flex gap-2">
@@ -294,7 +305,7 @@ export const BentoView: React.FC<BentoViewProps> = ({
                                 disabled={applyingNudgeId === nudge.id}
                                 className="flex-1 bg-secondary text-secondary-foreground hover:bg-secondary/80 text-xs font-bold py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
                               >
-                                <MessageSquarePlus size={14} /> 내 생각은 달라
+                                <MessageSquarePlus size={14} /> 수정 제안
                               </button>
                               <button
                                 onClick={() => onRejectNudge(nudge.id)}

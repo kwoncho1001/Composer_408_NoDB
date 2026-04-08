@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Note, CostEstimate, PitchDeck, CompetitorAnalysis, ProactiveNudge, LensType } from '../types';
 import { Layers, Blocks, Cpu, Code, AlertCircle, CheckCircle2, CircleDashed, Target, Loader2, X, Receipt, Cloud, Wrench, Zap, Presentation, FileText, Lightbulb, Users, Briefcase, Swords, Crosshair, ShieldAlert, Rocket, PlusCircle, Sparkles, MessageSquarePlus, ChevronRight, LayoutGrid, Map, Network } from 'lucide-react';
 import { ArchitectureRefinementModal } from './dashboard/ArchitectureRefinementModal';
-import { scopeMVP, estimateProjectCost, generatePitchDeck, analyzeCompetitor, generateInitialBlueprint, generateProactiveNudges, addFeatureBlueprint, refineIdeaWithSparring, generateDetailedBlueprint, refineBlueprintDraft } from '../services/gemini';
+import { KeywordInputModal, SuggestedKeywordsModal } from './dashboard/GenerationModals';
+import { scopeMVP, estimateProjectCost, generatePitchDeck, analyzeCompetitor, generateInitialBlueprint, generateProactiveNudges, generateProactiveNudgesWithKeywords, addFeatureBlueprint, refineIdeaWithSparring, generateDetailedBlueprint, refineBlueprintDraft, generateKeywords } from '../services/gemini';
 import * as dbManager from '../services/dbManager';
 import { saveNoteToSync } from '../services/syncManager';
 import ReactMarkdown from 'react-markdown';
@@ -61,19 +62,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
     loadingNudgeTypes, setLoadingNudgeTypes,
     isFetchingNudges, setIsFetchingNudges,
     isCoFounderOpen, setIsCoFounderOpen,
-    applyingNudgeId, setApplyingNudgeId
+    applyingNudgeId, setApplyingNudgeId,
+    generationMode, setGenerationMode
   } = useCoFounder();
+  const [showKeywordModal, setShowKeywordModal] = useState(false);
+  const [showSuggestedModal, setShowSuggestedModal] = useState(false);
+  const [suggestedKeywords, setSuggestedKeywords] = useState<string[]>([]);
+  const [isGeneratingKeywords, setIsGeneratingKeywords] = useState(false);
 
   const handleOpenCoFounder = async () => {
     setIsCoFounderOpen(true);
     if (nudges.length === 0 && notes.length > 0) {
       setIsFetchingNudges(true);
       try {
-        const [involutionNudges, evolutionNudges] = await Promise.all([
+        const results = await Promise.all([
           generateProactiveNudges(notes, pastNudges, 'Involution'),
           generateProactiveNudges(notes, pastNudges, 'Evolution')
         ]);
-        setNudges([...involutionNudges, ...evolutionNudges]);
+        console.log("Results:", results);
+        if (!Array.isArray(results)) {
+          console.error("results is not an array:", results);
+          return;
+        }
+        const [involutionNudges, evolutionNudges] = results;
+        console.log("involutionNudges:", involutionNudges);
+        console.log("evolutionNudges:", evolutionNudges);
+        const inv = Array.isArray(involutionNudges) ? involutionNudges : [];
+        const evo = Array.isArray(evolutionNudges) ? evolutionNudges : [];
+        setNudges([...inv, ...evo]);
       } catch (e) {
         console.error(e);
       } finally {
@@ -82,15 +98,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
     }
   };
 
-  const handleRerollAllNudges = async () => {
+  const handleRerollAllNudges = async (mode?: 'auto' | 'keyword' | 'suggested') => {
+    const currentMode = mode || generationMode;
+    setGenerationMode(currentMode);
+    
+    if (currentMode === 'keyword') {
+      setShowKeywordModal(true);
+      return;
+    }
+    if (currentMode === 'suggested') {
+      setIsGeneratingKeywords(true);
+      const keywords = await generateKeywords(notes);
+      setSuggestedKeywords(keywords);
+      setIsGeneratingKeywords(false);
+      setShowSuggestedModal(true);
+      return;
+    }
+    await performGeneration([]);
+  };
+
+  const performGeneration = async (keywords: string[]) => {
     setIsFetchingNudges(true);
     setNudges([]);
     try {
-      const [involutionNudges, evolutionNudges] = await Promise.all([
-        generateProactiveNudges(notes, pastNudges, 'Involution'),
-        generateProactiveNudges(notes, pastNudges, 'Evolution')
+      const results = await Promise.all([
+        generateProactiveNudgesWithKeywords(notes, pastNudges, 'Involution', keywords),
+        generateProactiveNudgesWithKeywords(notes, pastNudges, 'Evolution', keywords)
       ]);
-      setNudges([...involutionNudges, ...evolutionNudges]);
+      const [involutionNudges, evolutionNudges] = results;
+      const inv = Array.isArray(involutionNudges) ? involutionNudges : [];
+      const evo = Array.isArray(evolutionNudges) ? evolutionNudges : [];
+      setNudges([...inv, ...evo]);
     } catch (e) {
       console.error(e);
     } finally {
@@ -275,10 +313,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
   };
 
   const handleMagicStart = async () => {
-    if (!magicIdea.trim()) return;
+    if (!(magicIdea || '').trim()) return;
     setIsGeneratingMagic(true);
     try {
-      const blueprint = await generateInitialBlueprint(magicIdea.trim());
+      const blueprint = await generateInitialBlueprint((magicIdea || '').trim());
       if (blueprint && blueprint.domains && blueprint.domains.length > 0) {
         setDraftBlueprint(blueprint);
         setRefiningNudge(null);
@@ -331,7 +369,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
   };
 
   const handleScopeMVP = async () => {
-    if (!scopingConstraint.trim()) return;
+    if (!(scopingConstraint || '').trim()) return;
     setIsScoping(true);
     try {
       const targetNotes = [...modules, ...logics];
@@ -391,7 +429,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
   };
 
   const handleAnalyzeCompetitor = async () => {
-    if (!competitorName.trim()) return;
+    if (!(competitorName || '').trim()) return;
     setIsAnalyzingCompetitor(true);
     try {
       const analysis = await analyzeCompetitor(competitorName, notes);
@@ -449,7 +487,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
               />
               <button
                 onClick={handleMagicStart}
-                disabled={isGeneratingMagic || !magicIdea.trim()}
+                disabled={isGeneratingMagic || !(magicIdea || '').trim()}
                 className="bg-primary text-primary-foreground px-8 py-5 font-bold text-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
               >
                 {isGeneratingMagic ? (
@@ -595,7 +633,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
               </button>
               <button
                 onClick={handleScopeMVP}
-                disabled={isScoping || !scopingConstraint.trim()}
+                disabled={isScoping || !(scopingConstraint || '').trim()}
                 className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-xl text-sm font-bold hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
                 {isScoping ? <Loader2 size={16} className="animate-spin" /> : <Target size={16} />}
@@ -787,7 +825,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
               />
               <button
                 onClick={handleAnalyzeCompetitor}
-                disabled={isAnalyzingCompetitor || !competitorName.trim()}
+                disabled={isAnalyzingCompetitor || !(competitorName || '').trim()}
                 className="bg-rose-500 text-white px-6 py-3 rounded-xl text-sm font-bold hover:bg-rose-600 transition-colors disabled:opacity-50 flex items-center gap-2 shrink-0"
               >
                 {isAnalyzingCompetitor ? <Loader2 size={16} className="animate-spin" /> : <Crosshair size={16} />}
@@ -856,6 +894,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
         </div>
       )}
 
+      <KeywordInputModal 
+        isOpen={showKeywordModal} 
+        onClose={() => setShowKeywordModal(false)} 
+        onConfirm={(k) => { setShowKeywordModal(false); performGeneration([k]); }} 
+        title="키워드 입력" 
+      />
+      <SuggestedKeywordsModal 
+        isOpen={showSuggestedModal} 
+        onClose={() => setShowSuggestedModal(false)} 
+        onConfirm={(ks) => { setShowSuggestedModal(false); performGeneration(ks); }} 
+        title="키워드 선택" 
+        suggestions={suggestedKeywords}
+      />
     </div>
   );
 };

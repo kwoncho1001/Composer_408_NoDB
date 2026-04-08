@@ -122,7 +122,7 @@ export const Sidebar = ({
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProjectName.trim() || !user) return;
+    if (!(newProjectName || '').trim() || !user) return;
     
     setIsCreatingProject(true);
     try {
@@ -201,7 +201,7 @@ export const Sidebar = ({
   };
 
   const handleRenameProject = async (projectId: string) => {
-    if (!renamingProjectName.trim() || !user) return;
+    if (!(renamingProjectName || '').trim() || !user) return;
     try {
       const project = await dbManager.getProject(projectId);
       if (project) {
@@ -568,7 +568,7 @@ export const Sidebar = ({
                         <div className="flex gap-2">
                           <button 
                             type="submit" 
-                            disabled={!newProjectName.trim()}
+                            disabled={!(newProjectName || '').trim()}
                             className="flex-1 bg-primary text-primary-foreground text-xs font-bold py-2 rounded-xl shadow-lg shadow-primary/20 disabled:opacity-50 flex items-center justify-center gap-1"
                           >
                             <Plus size={12} />
@@ -601,29 +601,29 @@ export const Sidebar = ({
           <PanelLeftClose size={18} />
         </button>
         </div>
+      </div>
 
+      {/* Action Bar */}
+      <div className="px-5 py-3 border-b border-border flex justify-between items-center bg-muted/20">
         {/* Lens Switcher */}
         {selectedProjectId && (
-          <div className="flex bg-muted/50 p-1 rounded-xl border border-border w-full">
+          <div className="flex bg-muted/50 p-0.5 rounded-lg border border-border w-32">
             <button
               onClick={() => setActiveLens('Feature')}
-              className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${activeLens === 'Feature' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+              className={`flex-1 py-1 text-[10px] font-bold rounded-md transition-all ${activeLens === 'Feature' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}
             >
               🎯 Feature
             </button>
             <button
               onClick={() => setActiveLens('Snapshot')}
-              className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg transition-all ${activeLens === 'Snapshot' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+              className={`flex-1 py-1 text-[10px] font-bold rounded-md transition-all ${activeLens === 'Snapshot' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}
             >
               📸 Snap
             </button>
           </div>
         )}
-      </div>
-
-      {/* Action Bar */}
-      <div className="px-5 py-3 border-b border-border flex justify-end items-center bg-muted/20">
-        <div className="flex gap-1.5">
+        
+        <div className="flex gap-1.5 ml-auto">
           <button 
             onClick={handleToggleExpand} 
             className="p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground rounded-lg transition-all" 

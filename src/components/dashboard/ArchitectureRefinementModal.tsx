@@ -112,7 +112,7 @@ export const ArchitectureRefinementModal: React.FC<ArchitectureRefinementModalPr
                     onRefine(feedback);
                     setFeedback('');
                   }}
-                  disabled={isRefining || !feedback.trim()}
+                  disabled={isRefining || !(feedback || '').trim()}
                   className="bg-secondary text-secondary-foreground px-6 py-3 rounded-2xl text-base font-black hover:bg-secondary/80 transition-colors disabled:opacity-50 flex flex-col items-center justify-center gap-2 min-w-[140px]"
                 >
                   {isRefining ? <Loader2 size={24} className="animate-spin" /> : <MessageSquarePlus size={24} />}

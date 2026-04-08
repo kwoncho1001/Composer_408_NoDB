@@ -326,7 +326,7 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
     }
   };
 
-  const handleSync = async () => {
+  const handleSync = async (forceSync: boolean = false) => {
     if (!repoUrl || !user || !projectId) return;
     setSyncing(true);
     cancelSyncRef.current = false;
@@ -341,10 +341,8 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
       });
 
       addLog('Checking for changes...');
-      console.log(`[Sync] ProjectId: ${projectId}`);
       const currentSHA = await getCurrentCommitSHA(repoUrl);
-      const lastAnalyzedSHA = await dbManager.getSetting(`lastAnalyzedSHA_${projectId}`);
-      console.log(`[Sync] LastAnalyzedSHA: ${lastAnalyzedSHA}`);
+      const lastAnalyzedSHA = forceSync ? null : await dbManager.getSetting(`lastAnalyzedSHA_${projectId}`);
       
       let filesToProcess: any[] = [];
       
@@ -1040,7 +1038,7 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
               </button>
             ) : (
               <button
-                onClick={handleSync}
+                onClick={() => handleSync(true)}
                 disabled={syncing || !repoUrl}
                 className="flex items-center justify-center gap-2 px-4 py-3 bg-secondary text-secondary-foreground rounded-xl text-sm font-bold hover:bg-secondary/80 disabled:opacity-50 transition-all active:scale-95 border border-border"
               >

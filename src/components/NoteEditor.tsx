@@ -539,7 +539,7 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
                   <label className="block text-[10px] sm:text-xs font-black text-muted-foreground/70 uppercase mb-1 sm:mb-2 tracking-widest">Parent Nodes</label>
                   <textarea 
                     value={note.parentNoteIds?.join(', ') || ''} 
-                    onChange={e => updateNote({parentNoteIds: e.target.value.split(',').map(s => s.trim()).filter(Boolean)})}
+                    onChange={e => updateNote({parentNoteIds: e.target.value.split(',').map(s => (s || '').trim()).filter(Boolean)})}
                     className="w-full bg-background/50 border border-border rounded-xl p-2 sm:p-3 text-xs font-mono focus:ring-2 focus:ring-primary/20 outline-none transition-all resize-none min-h-[44px]"
                     placeholder="NODE_ID_1, NODE_ID_2..."
                     rows={1}

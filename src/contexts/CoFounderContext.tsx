@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState } from 'react';
 import { ProactiveNudge } from '../types';
 
+export type GenerationMode = 'auto' | 'keyword' | 'suggested';
+
 interface CoFounderContextType {
   nudges: ProactiveNudge[];
   setNudges: React.Dispatch<React.SetStateAction<ProactiveNudge[]>>;
@@ -14,6 +16,8 @@ interface CoFounderContextType {
   setIsCoFounderOpen: React.Dispatch<React.SetStateAction<boolean>>;
   applyingNudgeId: string | null;
   setApplyingNudgeId: React.Dispatch<React.SetStateAction<string | null>>;
+  generationMode: GenerationMode;
+  setGenerationMode: React.Dispatch<React.SetStateAction<GenerationMode>>;
 }
 
 const CoFounderContext = createContext<CoFounderContextType | undefined>(undefined);
@@ -25,6 +29,7 @@ export const CoFounderProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [isFetchingNudges, setIsFetchingNudges] = useState(false);
   const [isCoFounderOpen, setIsCoFounderOpen] = useState(false);
   const [applyingNudgeId, setApplyingNudgeId] = useState<string | null>(null);
+  const [generationMode, setGenerationMode] = useState<GenerationMode>('auto');
 
   return (
     <CoFounderContext.Provider value={{
@@ -33,7 +38,8 @@ export const CoFounderProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       loadingNudgeTypes, setLoadingNudgeTypes,
       isFetchingNudges, setIsFetchingNudges,
       isCoFounderOpen, setIsCoFounderOpen,
-      applyingNudgeId, setApplyingNudgeId
+      applyingNudgeId, setApplyingNudgeId,
+      generationMode, setGenerationMode
     }}>
       {children}
     </CoFounderContext.Provider>

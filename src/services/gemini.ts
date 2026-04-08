@@ -689,7 +689,7 @@ export const evaluateWithCSuite = async (noteTitle: string, noteSummary: string,
   }
 
   try {
-    const jsonStr = response.text.trim();
+    const jsonStr = (response.text || "").trim();
     return JSON.parse(jsonStr) as { cto: string, cmo: string, cfo: string, consensus: string };
   } catch (e) {
     console.error("Failed to parse C-Suite JSON", e);
@@ -757,7 +757,7 @@ ${notes.map(n => `ID: ${n.id} | Type: ${n.noteType} | Title: ${n.title} | Summar
   }
 
   try {
-    const jsonStr = response.text.trim();
+    const jsonStr = (response.text || "").trim();
     return JSON.parse(jsonStr).scoping as { id: string, priority: '1st' | '2nd' | '3rd', reason: string }[];
   } catch (e) {
     console.error("Failed to parse MVP scoping JSON", e);
@@ -765,22 +765,145 @@ ${notes.map(n => `ID: ${n.id} | Type: ${n.noteType} | Title: ${n.title} | Summar
   }
 };
 
-// Phase 7: Context-Aware Hierarchical Generation & Refinement
+export const generateProactiveNudgesWithKeywords = async (
+  notes: Note[], 
+  pastNudges: string[] = [], 
+  track: 'Involution' | 'Evolution', 
+  keywords: string[]
+) => {
+  let typeInstruction = '';
+  let typeDefinitions = '';
+  let allowedTypes = '';
+
+  if (track === 'Involution') {
+    typeInstruction = `반드시 4가지 타입(Cost, Debt, EdgeCase, Efficiency) 각각에 대해 1개씩, 총 4개의 내적 최적화(Involution) 제안을 생성하세요.`;
+    typeDefinitions = `[4가지 Nudge 타입 정의 (Track: Involution - 내적 최적화)]
+1. Cost (비용 최적화): "Firebase 읽기/쓰기 비용을 줄이기 위해 [A 로직]에 캐싱 계층을 도입하는 것은 어떨까요?"
+2. Debt (기술 부채 해결): "현재 [B 모듈]의 구조가 확장성에 제약이 될 수 있습니다. [C 패턴]으로 리팩토링할까요?"
+3. EdgeCase (예외/오류 처리): "유저가 [D 상황]에 처했을 때의 예외 처리가 누락되어 있습니다. 이를 보완할까요?"
+4. Efficiency (알고리즘/성능 효율화): "[E 기능]의 처리 속도를 높이기 위해 [F 최적화 기법]을 적용해볼 수 있습니다."`;
+    allowedTypes = `"Cost" | "Debt" | "EdgeCase" | "Efficiency"`;
+  } else {
+    typeInstruction = `반드시 4가지 타입(AhaMoment, HighImpact, Pivot, Expansion) 각각에 대해 1개씩, 총 4개의 외적 성장(Evolution) 제안을 생성하세요.`;
+    typeDefinitions = `[4가지 Nudge 타입 정의 (Track: Evolution - 외적 임팩트)]
+토스의 철학("임팩트 없는 디테일은 낭비다")을 반영하여, 사소한 UI 개선이 아닌 제품의 성패를 가를 거대한 변화를 제안하세요.
+1. AhaMoment (아하 모먼트): "유저가 이 서비스를 반드시 써야만 하는 결정적 순간을 만들기 위해 [A 기능]을 도입합시다."
+2. HighImpact (핵심 지표 10배 성장): "사소한 개선 대신, 지표를 폭발적으로 성장시킬 수 있는 [B 비즈니스 모델/기능]을 추가하는 것은 어떨까요?"
+3. Pivot (관점의 전환): "현재 [C 타겟]에 머물러 있는데, 이를 [D 시장]으로 확장하여 완전히 새로운 가치를 창출해봅시다."
+4. Expansion (생태계 확장): "단순한 유틸리티를 넘어, 유저들이 상호작용하는 [E 커뮤니티/플랫폼]으로 진화시켜야 합니다."`;
+    allowedTypes = `"AhaMoment" | "HighImpact" | "Pivot" | "Expansion"`;
+  }
+
+  const keywordInstruction = keywords.length > 0
+    ? `\n[사용자 지정 키워드: ${keywords.join(', ')}]\n이 키워드들과 관련된 인사이트를 우선적으로 생성하세요.`
+    : '';
+
+  const blacklistInstruction = pastNudges.length > 0
+    ? `\n[주의: 다음 아이디어들은 이미 사용자가 거절했거나 검토한 내용이므로 **절대 중복해서 제안하지 마세요**]\n${pastNudges.map(n => `- ${n}`).join('\n')}\n`
+    : '';
+
+  const systemContext = notes.map(n => {
+    let text = `[${n.noteType}] ${n.title} (Status: ${n.status})`;
+    if (n.summary) text += `\n  Summary: ${n.summary}`;
+    if (n.flow) text += `\n  Flow: ${n.flow}`;
+    return text;
+  }).join('\n\n');
+
+  const prompt = `당신은 비전공자 창업자를 돕는 세계 최고의 비즈니스 파트너이자 AI 코파운더입니다.
+단순히 기술적인 조언을 하는 것이 아니라, 사용자의 프로젝트를 깊이 있게 분석하여 누구나 이해할 수 있는 쉬운 언어로 실질적인 조언을 제공해야 합니다.
+
+${track === 'Involution' ? '현재 서비스가 더 빠르고 안정적으로 돌아가기 위한 내실을 다지는 제안을 하세요.' : '사소한 기능 개선이 아닌, 서비스의 성패를 결정지을 수 있는 거대한 변화와 성장을 위한 제안을 하세요.'}
+
+${typeInstruction}
+${keywordInstruction}
+${blacklistInstruction}
+${typeDefinitions}
+
+[작성 지침 - 매우 중요]
+1. 비전공자도 한눈에 이해할 수 있도록 아주 쉬운 일상 언어를 사용하세요.
+2. '캐싱', '리팩토링', 'API', '인프라' 같은 기술 용어는 절대 사용하지 마세요. 대신 '정보 임시 저장', '구조 개선', '연결 통로' 등으로 풀어서 설명하세요.
+3. 제안의 핵심은 '사용자가 얻는 가치'와 '비즈니스적 이득'이어야 합니다.
+4. 가설(hypothesis) 부분은 "이 기능을 추가하면 [A]라는 문제가 해결되고, 결과적으로 [B]라는 이득이 생깁니다"라는 논리 구조로 작성하세요.
+
+[현재 프로젝트 전체 설계 요약]
+${systemContext}
+
+반드시 아래 JSON 형식으로만 응답하세요.
+{
+  "nudges": [
+    {
+      "id": "고유 ID",
+      "nudgeType": ${allowedTypes},
+      "track": "${track}",
+      "context": "현재 상황에 대한 쉬운 진단 (1문장)",
+      "question": "사용자에게 던지는 핵심 질문 (1문장, 예: '결제 과정을 더 단순하게 줄여볼까요?')",
+      "hypothesis": "이 제안을 선택했을 때의 기대 효과 (비전공자도 이해할 수 있는 쉬운 설명)",
+      "actionPrompt": "이 아이디어를 시스템에 추가하기 위한 구체적인 행동 지침"
+    }
+  ]
+}
+`;
+
+  const responsePromise = ai.models.generateContent({
+    model: PRO_MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          nudges: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                nudgeType: { type: Type.STRING },
+                context: { type: Type.STRING },
+                question: { type: Type.STRING },
+                hypothesis: { type: Type.STRING },
+                actionPrompt: { type: Type.STRING }
+              },
+              required: ["id", "nudgeType", "context", "question", "hypothesis", "actionPrompt"]
+            }
+          }
+        },
+        required: ["nudges"]
+      }
+    }
+  });
+
+  const response = await withTimeout(responsePromise, 60000, { text: '{"nudges": []}' } as any);
+  
+  if (!response || !response.text) {
+    console.warn("Gemini returned empty response for nudges, returning empty array.");
+    return [];
+  }
+
+  try {
+    const jsonStr = response.text.trim();
+    console.log("JSON String:", jsonStr);
+    const parsed = JSON.parse(jsonStr).nudges as any[];
+    console.log("Parsed:", parsed);
+    if (!parsed) return [];
+    return parsed.map(n => ({ ...n, track })) as ProactiveNudge[];
+  } catch (e) {
+    console.error("Failed to parse Nudges JSON", e);
+    return [];
+  }
+};
+
+
 export const refineBlueprintDraft = async (draft: any, feedback: string) => {
+  const safeDraft = draft || {};
   const prompt = `당신은 비전공자 창업자를 돕는 친절한 기술 파트너입니다.
 현재 초안으로 작성된 설계도(Blueprint)가 있습니다. 사용자의 피드백을 반영하여 이 설계도를 수정/보완하세요.
 
 [현재 설계도 초안]
-${JSON.stringify(draft, null, 2)}
+${JSON.stringify(safeDraft, null, 2)}
 
 [사용자 피드백]
 ${feedback}
-
-[작성 지침 - 매우 중요]
-1. 비전공자도 이해할 수 있도록 아주 쉬운 일상 언어를 유지하세요.
-2. 전문 용어보다는 기능의 목적과 효과를 중심으로 설명하세요.
-3. 사용자의 피드백을 적극 반영하여 영역, 기능, 규칙을 추가, 수정, 또는 삭제하세요.
-4. 기존의 JSON 구조(domains -> modules -> logics)를 반드시 유지하세요.
 
 반드시 아래 JSON 형식으로만 응답하세요:
 {
@@ -802,64 +925,47 @@ ${feedback}
       ]
     }
   ]
-}`;
+}
+`;
 
   const responsePromise = ai.models.generateContent({
     model: PRO_MODEL,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          domains: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                summary: { type: Type.STRING },
-                modules: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      title: { type: Type.STRING },
-                      summary: { type: Type.STRING },
-                      logics: {
-                        type: Type.ARRAY,
-                        items: {
-                          type: Type.OBJECT,
-                          properties: {
-                            title: { type: Type.STRING },
-                            summary: { type: Type.STRING }
-                          },
-                          required: ["title", "summary"]
-                        }
-                      }
-                    },
-                    required: ["title", "summary", "logics"]
-                  }
-                }
-              },
-              required: ["title", "summary", "modules"]
-            }
-          }
-        },
-        required: ["domains"]
-      }
     }
   });
 
-  const response = await withTimeout(responsePromise, 60000, { text: JSON.stringify(draft) } as any);
+  const response = await withTimeout(responsePromise, 60000, { text: JSON.stringify(safeDraft) } as any);
   try {
-    return JSON.parse(response.text || "{}");
+    return JSON.parse(response.text || JSON.stringify(safeDraft));
   } catch (e) {
     console.error("Failed to refine blueprint draft", e);
-    return draft;
+    return safeDraft;
   }
 };
+export const generateKeywords = async (notes: Note[]) => {
+  const prompt = `현재 프로젝트의 설계 요약을 바탕으로, 인사이트를 생성하기 위한 핵심 키워드 5개를 생성하세요.
+[설계 요약]
+${notes.map(n => n.title).join(', ')}
 
+반드시 아래 JSON 형식으로만 응답하세요:
+{
+  "keywords": ["키워드1", "키워드2", "키워드3", "키워드4", "키워드5"]
+}
+`;
+  const responsePromise = ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: { responseMimeType: "application/json" }
+  });
+  const response = await withTimeout(responsePromise, 30000, { text: '{"keywords": []}' } as any);
+  try {
+    return JSON.parse(response.text || '{"keywords": []}').keywords;
+  } catch (e) {
+    return [];
+  }
+};
 export const generateDetailedNodeContent = async (nodeType: string, title: string, summary: string, parentContext: string, siblingContext: string) => {
   const prompt = `당신은 비전공자 창업자를 돕는 친절한 기술 가이드입니다.
 다음 항목에 대한 상세 설명과 작동 규칙을 작성해주세요.
@@ -888,7 +994,6 @@ export const generateDetailedNodeContent = async (nodeType: string, title: strin
   const response = await withTimeout(responsePromise, 45000, { text: `${summary}\n\n(상세 내용 생성 실패)` } as any);
   return response.text || summary;
 };
-
 export const generateDetailedBlueprint = async (blueprint: any, onProgress?: (msg: string) => void) => {
   const detailedDomains = [];
 
@@ -1449,7 +1554,9 @@ ${systemContext}
 
   try {
     const jsonStr = response.text.trim();
+    console.log("JSON String:", jsonStr);
     const parsed = JSON.parse(jsonStr).nudges as any[];
+    console.log("Parsed:", parsed);
     if (!parsed) return [];
     return parsed.map(n => ({ ...n, track })) as ProactiveNudge[];
   } catch (e) {
