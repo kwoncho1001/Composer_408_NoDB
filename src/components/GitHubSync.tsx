@@ -334,7 +334,9 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
     addLog(`Starting sync for ${repoUrl}...`);
 
     try {
+      const project = await dbManager.getProject(projectId);
       await dbManager.saveProject({
+        ...project,
         id: projectId,
         repoUrl,
         uid: user.uid

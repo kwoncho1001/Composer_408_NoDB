@@ -293,7 +293,7 @@ export const Sidebar = ({
               }}
               className="p-0.5 hover:bg-accent rounded-md transition-colors text-inherit opacity-50 hover:opacity-100"
             >
-              <ChevronDown size={10} className={`transition-transform duration-200 ${isCollapsed ? '-rotate-90' : ''}`} />
+              <ChevronDown size={10} className={`shrink-0 transition-transform duration-200 ${isCollapsed ? '-rotate-90' : ''}`} />
             </button>
           )}
 
@@ -345,8 +345,8 @@ export const Sidebar = ({
               );
             }}
           >
-            <ChevronDown size={12} className={`transition-transform duration-200 ${isCollapsed ? '-rotate-90' : ''}`} />
-            <FolderGit2 size={14} className="text-primary/70" />
+            <ChevronDown size={12} className={`shrink-0 transition-transform duration-200 ${isCollapsed ? '-rotate-90' : ''}`} />
+            <FolderGit2 size={14} className="shrink-0 text-primary/70" />
             <span className="text-[11px] font-bold truncate tracking-tight">{path}</span>
           </div>
           
@@ -449,7 +449,7 @@ export const Sidebar = ({
             <div className="w-8 h-8 bg-primary/10 rounded-lg flex items-center justify-center text-primary glow-primary">
               <FolderGit2 size={18} />
             </div>
-            <span className="truncate flex-1 text-sm tracking-tight">{selectedProject ? selectedProject.name : 'Select Project'}</span>
+            <span className="truncate flex-1 text-sm tracking-tight">{selectedProject ? (selectedProject.name || 'Untitled Project') : 'Select Project'}</span>
             <ChevronDown size={16} className="text-muted-foreground" />
           </button>
           
@@ -521,7 +521,7 @@ export const Sidebar = ({
                                 p.id === selectedProjectId ? 'bg-primary/10 text-primary font-semibold' : 'hover:bg-accent text-muted-foreground hover:text-foreground'
                               }`}
                             >
-                              <span className="truncate pr-6">{p.name}</span>
+                              <span className="truncate pr-6">{p.name || 'Untitled Project'}</span>
                               {p.id === selectedProjectId && <Check size={14} />}
                             </button>
                             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center opacity-0 group-hover/project:opacity-100 transition-opacity">

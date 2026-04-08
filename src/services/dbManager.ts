@@ -2,10 +2,11 @@ import { openDB, IDBPDatabase } from 'idb';
 import { Note } from '../types';
 
 const DB_NAME = 'composer-db';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const STORE_NOTES = 'notes';
 const STORE_PROJECTS = 'projects';
 const STORE_SYNC_LEDGERS = 'sync_ledgers';
+const STORE_SETTINGS = 'settings';
 
 let dbPromise: Promise<IDBPDatabase<any>>;
 
@@ -24,6 +25,11 @@ export const initDB = () => {
         if (oldVersion < 3) {
           if (!db.objectStoreNames.contains(STORE_SYNC_LEDGERS)) {
             db.createObjectStore(STORE_SYNC_LEDGERS, { keyPath: 'id' });
+          }
+        }
+        if (oldVersion < 6) {
+          if (!db.objectStoreNames.contains(STORE_SETTINGS)) {
+            db.createObjectStore(STORE_SETTINGS);
           }
         }
       },
@@ -96,4 +102,15 @@ export const saveSyncLedger = async (ledger: any) => {
 export const deleteSyncLedger = async (id: string) => {
   const db = await initDB();
   await db.delete(STORE_SYNC_LEDGERS, id);
+};
+
+// Settings methods
+export const getSetting = async (key: string): Promise<any | null> => {
+  const db = await initDB();
+  return db.get(STORE_SETTINGS, key);
+};
+
+export const saveSetting = async (key: string, value: any) => {
+  const db = await initDB();
+  await db.put(STORE_SETTINGS, value, key);
 };
