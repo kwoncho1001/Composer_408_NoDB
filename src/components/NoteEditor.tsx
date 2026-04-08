@@ -36,6 +36,7 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
   const [conflictResolutionGuide, setConflictResolutionGuide] = useState<string | null>(null);
   const [isEvaluatingCSuite, setIsEvaluatingCSuite] = useState(false);
   const [cSuiteEval, setCSuiteEval] = useState<CSuiteEvaluation | null>(null);
+  const [evalCache, setEvalCache] = useState<Record<string, CSuiteEvaluation>>({});
   const [showMetadata, setShowMetadata] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('showMetadata') !== 'false';
@@ -61,6 +62,13 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
 
     const fetchNote = async () => {
       try {
+        // Restore from cache if exists
+        if (noteId && evalCache[noteId]) {
+          setCSuiteEval(evalCache[noteId]);
+        } else {
+          setCSuiteEval(null);
+        }
+
         const allNotes = await dbManager.getAllNotes();
         const data = allNotes.find(n => n.id === noteId) || null;
         if (data && data.status === 'Done' && data.priority !== 'Done') {
@@ -301,6 +309,7 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
     try {
       const evaluation = await evaluateWithCSuite(note.title || '', note.summary || '', note.noteType || 'Logic');
       setCSuiteEval(evaluation);
+      setEvalCache(prev => ({ ...prev, [noteId]: evaluation }));
     } catch (error) {
       console.error("Failed to evaluate with C-Suite", error);
       alert("Failed to evaluate: " + (error as Error).message);
@@ -603,7 +612,21 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
                   <Users size={16} />
                   AI C-Suite Evaluation
                 </h3>
-                <button onClick={() => setCSuiteEval(null)} className="text-xs text-muted-foreground hover:text-foreground">Dismiss</button>
+                <button 
+                  onClick={() => {
+                    setCSuiteEval(null);
+                    if (noteId) {
+                      setEvalCache(prev => {
+                        const next = { ...prev };
+                        delete next[noteId];
+                        return next;
+                      });
+                    }
+                  }} 
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Dismiss
+                </button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

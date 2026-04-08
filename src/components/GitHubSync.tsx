@@ -9,6 +9,7 @@ import { computeHash } from '../lib/utils';
 import * as dbManager from '../services/dbManager';
 import { Github, RefreshCw, AlertCircle, PanelRightClose, X, Trash2, ChevronDown, ChevronUp, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
+import pLimit from 'p-limit';
 
 export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, setActiveLens }: { onClose: () => void, projectId: string | null, onSyncComplete?: () => void, activeLens: LensType, setActiveLens: (lens: LensType) => void }) => {
   const { user } = useAuth();
@@ -170,11 +171,17 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
       }
 
       addLog(`Generating Module details using AI...`);
-      const generatedModules: { id: string, title: string, summary: string, body: string, logicIds: string[] }[] = [];
+      const generatedModules: { id: string, title: string, summary: string, components: string, flow: string, io: string, logicIds: string[] }[] = [];
       
       const clusterPromises = Object.entries(clusters).map(async ([clusterId, logics], idx) => {
         if (cancelSyncRef.current) return;
-        const logicsData = logics.map(l => ({ title: l.title, summary: l.summary }));
+        const logicsData = logics.map(l => ({ 
+          title: l.title, 
+          summary: l.summary,
+          components: l.components,
+          flow: l.flow,
+          io: l.io
+        }));
         const moduleData = await generateModuleFromCluster(logicsData);
         generatedModules.push({
           id: `MOD_${idx}`,
@@ -187,7 +194,14 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
       if (cancelSyncRef.current) throw new Error("Reconstruction cancelled by user");
 
       addLog(`Grouping ${generatedModules.length} Modules into Domains...`);
-      const modulesData = generatedModules.map(m => ({ id: m.id, title: m.title, summary: m.summary }));
+      const modulesData = generatedModules.map(m => ({ 
+        id: m.id, 
+        title: m.title, 
+        summary: m.summary,
+        components: m.components,
+        flow: m.flow,
+        io: m.io
+      }));
       const domainsBlueprint = await generateDomainsFromModules(modulesData);
 
       if (!domainsBlueprint.domains || domainsBlueprint.domains.length === 0) {
@@ -215,6 +229,9 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
           title: domainData.title.substring(0, 200),
           projectId,
           summary: domainData.summary || '',
+          components: domainData.components || '',
+          flow: domainData.flow || '',
+          io: domainData.io || '',
           body: '',
           noteType: 'Domain',
           status: 'Planned',
@@ -242,7 +259,10 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
               title: moduleData.title.substring(0, 200),
               projectId,
               summary: moduleData.summary || '',
-              body: moduleData.body || '',
+              components: moduleData.components || '',
+              flow: moduleData.flow || '',
+              io: moduleData.io || '',
+              body: '',
               noteType: 'Module',
               status: 'Planned',
               priority: '3rd',
@@ -412,13 +432,13 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
         }
       }
 
-      addLog(`Starting sequential synchronization for ${filesToProcess.length} files...`);
+      addLog(`Starting parallel synchronization for ${filesToProcess.length} files...`);
       const claimedEmptyLogics = new Set<string>();
+      const limit = pLimit(10); // Process 10 files in parallel
 
-      for (let fileIndex = 0; fileIndex < filesToProcess.length; fileIndex++) {
-        if (cancelSyncRef.current) break;
+      await Promise.all(filesToProcess.map((file, fileIndex) => limit(async () => {
+        if (cancelSyncRef.current) return;
         
-        const file = filesToProcess[fileIndex];
         addLog(`\n[${fileIndex + 1}/${filesToProcess.length}] Processing file: ${file.path}`);
         
         try {
@@ -433,88 +453,79 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
             fileLogicUnits.push({ unit, file, content, unitHash });
           }
           
-          addLog(`  Extracted ${fileLogicUnits.length} logic units.`);
+          addLog(`  Extracted ${fileLogicUnits.length} logic units for ${file.path}.`);
 
-          if (cancelSyncRef.current) break;
+          if (cancelSyncRef.current) return;
 
-          addLog(`  Phase 2: AI Deep Analysis...`);
-          const BATCH_SIZE = 3;
-          for (let i = 0; i < fileLogicUnits.length; i += BATCH_SIZE) {
-            if (cancelSyncRef.current) break;
-            const batchUnits = fileLogicUnits.slice(i, i + BATCH_SIZE);
+          addLog(`  Phase 2: AI Deep Analysis for ${file.path}...`);
+          const BATCH_SIZE = 50;
+          const analysisLimit = pLimit(20); // 20 concurrent AI calls per file
 
-            await Promise.all(batchUnits.map(async (item) => {
-              const { unit, file, unitHash } = item;
-              const cachedNote = allNotes.find(n => n.noteType === 'Snapshot' && n.contentHash === unitHash && n.originPath === file.path);
-              
-              if (cachedNote) {
-                addLog(`    Cache Hit: Skipping AI analysis for ${unit.title}`);
-                const parentLogic = allNotes.find(n => n.noteType === 'Logic' && n.childNoteIds.includes(cachedNote.id));
-                if (parentLogic) {
-                  item.isCacheHit = true;
-                  item.cachedNote = cachedNote;
-                  item.parentLogic = parentLogic;
-                  item.businessLogic = {
-                    title: parentLogic.title,
-                    summary: parentLogic.summary,
-                    components: parentLogic.components,
-                    flow: parentLogic.flow,
-                    io: parentLogic.io
-                  };
-                  item.analysis = {
-                    title: cachedNote.title,
-                    summary: cachedNote.summary,
-                    components: cachedNote.components,
-                    flow: cachedNote.flow,
-                    io: cachedNote.io
-                  };
-                  item.caseType = '4-1';
-                  item.targetLogicB = parentLogic;
-                  item.targetSnapshotB = cachedNote;
-                  item.isConflict = parentLogic.status === 'Conflict';
-                  item.conflictDetails = parentLogic.conflictDetails;
-                  item.logicAEmbedding = null;
-                  item.logicHash = parentLogic.embeddingHash || null;
-                }
-              }
-
-              if (!item.isCacheHit) {
-                try {
-                  addLog(`    Analyzing: ${unit.title}`);
-                  item.analysis = await analyzeLogicUnit(unit.title, unit.code);
-                } catch (err) {
-                  addLog(`    Error analyzing ${unit.title}: ${err}`);
-                  item.error = true;
-                }
-              }
-            }));
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-
-          if (cancelSyncRef.current) break;
-
-          addLog(`  Phase 3: Generating Business Logic...`);
-          for (let i = 0; i < fileLogicUnits.length; i += BATCH_SIZE) {
-            if (cancelSyncRef.current) break;
-            const batchUnits = fileLogicUnits.slice(i, i + BATCH_SIZE).filter(item => !item.isCacheHit && !item.error);
+          await Promise.all(fileLogicUnits.map(async (item) => analysisLimit(async () => {
+            if (cancelSyncRef.current) return;
+            const { unit, file, unitHash } = item;
+            const cachedNote = allNotes.find(n => n.noteType === 'Snapshot' && n.contentHash === unitHash && n.originPath === file.path);
             
-            if (batchUnits.length > 0) {
-              await Promise.all(batchUnits.map(async (item) => {
-                try {
-                  addLog(`    Translating: ${item.unit.title}`);
-                  item.businessLogic = await translateToBusinessLogic({ title: item.unit.title, ...item.analysis });
-                } catch (err) {
-                  addLog(`    Error translating ${item.unit.title}: ${err}`);
-                  item.error = true;
-                }
-              }));
-              await new Promise(resolve => setTimeout(resolve, 500));
+            if (cachedNote) {
+              addLog(`    Cache Hit: Skipping AI analysis for ${unit.title}`);
+              const parentLogic = allNotes.find(n => n.noteType === 'Logic' && n.childNoteIds.includes(cachedNote.id));
+              if (parentLogic) {
+                item.isCacheHit = true;
+                item.cachedNote = cachedNote;
+                item.parentLogic = parentLogic;
+                item.businessLogic = {
+                  title: parentLogic.title,
+                  summary: parentLogic.summary,
+                  components: parentLogic.components,
+                  flow: parentLogic.flow,
+                  io: parentLogic.io
+                };
+                item.analysis = {
+                  title: cachedNote.title,
+                  summary: cachedNote.summary,
+                  components: cachedNote.components,
+                  flow: cachedNote.flow,
+                  io: cachedNote.io
+                };
+                item.caseType = '4-1';
+                item.targetLogicB = parentLogic;
+                item.targetSnapshotB = cachedNote;
+                item.isConflict = parentLogic.status === 'Conflict';
+                item.conflictDetails = parentLogic.conflictDetails;
+                item.logicAEmbedding = null;
+                item.logicHash = parentLogic.embeddingHash || null;
+              }
             }
-          }
 
-          if (cancelSyncRef.current) break;
+            if (!item.isCacheHit) {
+              try {
+                addLog(`    Analyzing: ${unit.title}`);
+                item.analysis = await analyzeLogicUnit(unit.title, unit.code);
+              } catch (err) {
+                addLog(`    Error analyzing ${unit.title}: ${err}`);
+                item.error = true;
+              }
+            }
+          })));
 
-          addLog(`  Phase 4: Vector Search Mapping...`);
+          if (cancelSyncRef.current) return;
+
+          addLog(`  Phase 3: Generating Business Logic for ${file.path}...`);
+          const translationLimit = pLimit(20);
+          await Promise.all(fileLogicUnits.filter(item => !item.isCacheHit && !item.error).map(async (item) => translationLimit(async () => {
+            if (cancelSyncRef.current) return;
+            try {
+              addLog(`    Translating: ${item.unit.title}`);
+              item.businessLogic = await translateToBusinessLogic({ title: item.unit.title, ...item.analysis });
+            } catch (err) {
+              addLog(`    Error translating ${item.unit.title}: ${err}`);
+              item.error = true;
+            }
+          })));
+
+          if (cancelSyncRef.current) return;
+
+          addLog(`  Phase 4: Vector Search Mapping for ${file.path}...`);
           const unitsToEmbed = fileLogicUnits.filter(item => !item.isCacheHit && !item.error);
           const textsToEmbed: string[] = [];
           const indicesToEmbed: number[] = [];
@@ -536,8 +547,8 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
           }
 
           if (textsToEmbed.length > 0) {
-            addLog(`    Calculating embeddings for ${textsToEmbed.length} units...`);
-            const EMBED_CHUNK_SIZE = 20;
+            addLog(`    Calculating embeddings for ${textsToEmbed.length} units in ${file.path}...`);
+            const EMBED_CHUNK_SIZE = 100;
             for (let i = 0; i < textsToEmbed.length; i += EMBED_CHUNK_SIZE) {
               if (cancelSyncRef.current) break;
               const chunkTexts = textsToEmbed.slice(i, i + EMBED_CHUNK_SIZE);
@@ -557,7 +568,7 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
             }
           }
 
-          if (cancelSyncRef.current) break;
+          if (cancelSyncRef.current) return;
 
           for (const item of unitsToEmbed) {
             if (cancelSyncRef.current) break;
@@ -618,12 +629,11 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
             } else {
               addLog(`    [Queue] No match found. Creating new room (4-3).`);
             }
-            await new Promise(resolve => setTimeout(resolve, 1000));
           }
 
-          if (cancelSyncRef.current) break;
+          if (cancelSyncRef.current) return;
 
-          addLog(`  Phase 5: Tree Assembly & Persistence...`);
+          addLog(`  Phase 5: Tree Assembly & Persistence for ${file.path}...`);
           for (const result of fileLogicUnits) {
             if (result.error) continue;
             
@@ -794,7 +804,7 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
         } catch (err) {
           addLog(`  Error processing file ${file.path}: ${err}`);
         }
-      }
+      })));
 
       addLog('Sync complete!');
       await dbManager.saveSetting(`lastAnalyzedSHA_${projectId}`, currentSHA);

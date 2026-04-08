@@ -1090,7 +1090,7 @@ ${notes.map(n => `Type: ${n.noteType} | Priority: ${n.priority} | Title: ${n.tit
   }
 };
 
-export const generateModuleFromCluster = async (logics: {title: string, summary: string}[]) => {
+export const generateModuleFromCluster = async (logics: {title: string, summary: string, components?: string, flow?: string, io?: string}[]) => {
   const prompt = `당신은 세계 최고의 소프트웨어 아키텍트입니다.
 다음은 수학적 유사도를 기반으로 군집화된 로직(Logic)들의 목록입니다. 이 로직들을 포괄하는 하나의 모듈(Module)을 설계하세요.
 
@@ -1100,25 +1100,16 @@ ${JSON.stringify(logics, null, 2)}
 [요구사항]
 1. 모듈의 이름(title)과 한 줄 요약(summary)을 **한국어**로 작성하세요.
 2. **중요**: 제목(title)은 개발자가 아닌 일반 사용자나 기획자도 한눈에 이해할 수 있을 만큼 **매우 직관적이고 쉬운 단어**를 사용하세요. (예: 'AuthModule' 대신 '사용자 인증 및 보안 관리')
-3. 모듈의 상세 본문(body)은 다음 Markdown 템플릿을 엄격히 따라 작성하세요:
-
-### 🎯 역할 및 목적 (Role & Purpose)
-이 모듈이 시스템 내에서 어떤 역할을 수행하는지 1~2줄로 요약.
-
-### ⚙️ 핵심 로직 (Core Logics)
-포함된 로직들이 구체적으로 어떤 흐름으로 작동하는지 설명.
-
-### 🔌 인터페이스 및 의존성 (Interfaces & Dependencies)
-이 모듈이 외부(다른 모듈이나 사용자)와 어떻게 상호작용하는지 (입력/출력 관점).
-
-### ⚠️ 예외 및 엣지 케이스 (Edge Cases)
-이 모듈이 처리해야 할 잠재적 오류나 예외 상황.
+3. 하위 로직들의 정보를 종합하여 비즈니스 구성 요소(components), 논리적 흐름(flow), 비즈니스 입출력(io)을 마크다운 형식으로 작성하세요.
+4. 가독성을 위해 리스트 항목 사이에는 반드시 빈 줄을 삽입하세요.
 
 반드시 아래 JSON 형식으로만 응답하세요:
 {
   "title": "직관적인 한국어 모듈 이름",
   "summary": "한국어 모듈 한 줄 요약",
-  "body": "마크다운 형식의 상세 본문"
+  "components": "마크다운 형식의 비즈니스 구성 요소",
+  "flow": "마크다운 형식의 논리적 흐름",
+  "io": "마크다운 형식의 비즈니스 입출력"
 }`;
 
   const responsePromise = ai.models.generateContent({
@@ -1131,23 +1122,25 @@ ${JSON.stringify(logics, null, 2)}
         properties: {
           title: { type: Type.STRING },
           summary: { type: Type.STRING },
-          body: { type: Type.STRING }
+          components: { type: Type.STRING },
+          flow: { type: Type.STRING },
+          io: { type: Type.STRING }
         },
-        required: ["title", "summary", "body"]
+        required: ["title", "summary", "components", "flow", "io"]
       }
     }
   });
 
-  const response = await withTimeout(responsePromise, 30000, { text: "{}" } as any);
+  const response = await withTimeout(responsePromise, 45000, { text: "{}" } as any);
   try {
     return JSON.parse(response.text || "{}");
   } catch (e) {
     console.error("Failed to generate module from cluster", e);
-    return { title: "Unknown Module", summary: "Failed to generate", body: "" };
+    return { title: "Unknown Module", summary: "Failed to generate", components: "", flow: "", io: "" };
   }
 };
 
-export const generateDomainsFromModules = async (modules: {id: string, title: string, summary: string}[]) => {
+export const generateDomainsFromModules = async (modules: {id: string, title: string, summary: string, components?: string, flow?: string, io?: string}[]) => {
   const prompt = `당신은 세계 최고의 소프트웨어 아키텍트입니다.
 다음은 시스템을 구성하는 모듈(Module)들의 목록입니다. 이 모듈들을 분석하여 3~5개의 최상위 도메인(Domain)으로 분류하고 설계하세요.
 
@@ -1155,9 +1148,10 @@ export const generateDomainsFromModules = async (modules: {id: string, title: st
 ${JSON.stringify(modules, null, 2)}
 
 [요구사항]
-1. 각 도메인의 이름(title)과 요약(summary)을 **한국어**로 작성하세요.
+1. 각 도메인의 이름(title), 요약(summary), 비즈니스 구성 요소(components), 논리적 흐름(flow), 비즈니스 입출력(io)을 **한국어**로 작성하세요.
 2. **중요**: 도메인 제목(title)은 시스템의 거대한 뼈대를 나타내므로, 누구나 한눈에 시스템의 큰 구역을 파악할 수 있도록 **매우 직관적이고 명확한 한국어 단어**를 사용하세요. (예: 'CoreDomain' 대신 '핵심 서비스 엔진')
 3. 각 도메인에 속하는 모듈들의 ID(moduleIds)를 배열로 매핑하세요. 모든 모듈은 반드시 하나의 도메인에 속해야 합니다.
+4. 가독성을 위해 리스트 항목 사이에는 반드시 빈 줄을 삽입하세요.
 
 반드시 아래 JSON 형식으로만 응답하세요:
 {
@@ -1165,6 +1159,9 @@ ${JSON.stringify(modules, null, 2)}
     {
       "title": "직관적인 한국어 도메인 이름",
       "summary": "한국어 도메인 요약",
+      "components": "마크다운 형식의 비즈니스 구성 요소",
+      "flow": "마크다운 형식의 논리적 흐름",
+      "io": "마크다운 형식의 비즈니스 입출력",
       "moduleIds": ["모듈 ID 1", "모듈 ID 2"]
     }
   ]
@@ -1185,12 +1182,15 @@ ${JSON.stringify(modules, null, 2)}
               properties: {
                 title: { type: Type.STRING },
                 summary: { type: Type.STRING },
+                components: { type: Type.STRING },
+                flow: { type: Type.STRING },
+                io: { type: Type.STRING },
                 moduleIds: {
                   type: Type.ARRAY,
                   items: { type: Type.STRING }
                 }
               },
-              required: ["title", "summary", "moduleIds"]
+              required: ["title", "summary", "components", "flow", "io", "moduleIds"]
             }
           }
         },
