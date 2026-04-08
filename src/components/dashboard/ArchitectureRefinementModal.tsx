@@ -1,6 +1,14 @@
-import React, { useState } from 'react';
-import { X, Layers, Blocks, Cpu, Loader2, Sparkles, MessageSquarePlus, CheckCircle2 } from 'lucide-react';
-import { motion } from 'motion/react';
+import React, { useState, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import { X, Layers, Blocks, Cpu, Loader2, Sparkles, MessageSquarePlus, CheckCircle2, ShieldAlert, Zap, TrendingUp, AlertTriangle } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { cn } from '../../lib/utils';
+
+interface ArchitectureInsight {
+  type: 'constraint' | 'risk' | 'scalability';
+  title: string;
+  description: string;
+}
 
 interface ArchitectureRefinementModalProps {
   isOpen: boolean;
@@ -11,6 +19,8 @@ interface ArchitectureRefinementModalProps {
   isRefining: boolean;
   isFinalizing: boolean;
   progressMessage?: string;
+  insights?: ArchitectureInsight[];
+  isFetchingInsights?: boolean;
 }
 
 export const ArchitectureRefinementModal: React.FC<ArchitectureRefinementModalProps> = ({
@@ -21,15 +31,27 @@ export const ArchitectureRefinementModal: React.FC<ArchitectureRefinementModalPr
   onFinalize,
   isRefining,
   isFinalizing,
-  progressMessage
+  progressMessage,
+  insights = [],
+  isFetchingInsights = false
 }) => {
   const [feedback, setFeedback] = useState('');
+  const [showInsights, setShowInsights] = useState(true);
 
   if (!isOpen || !blueprint) return null;
 
+  const InsightIcon = ({ type }: { type: string }) => {
+    switch (type) {
+      case 'risk': return <ShieldAlert size={18} className="text-red-500" />;
+      case 'scalability': return <Zap size={18} className="text-yellow-500" />;
+      case 'constraint': return <AlertTriangle size={18} className="text-blue-500" />;
+      default: return <TrendingUp size={18} className="text-primary" />;
+    }
+  };
+
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-      <div className="bg-card border border-border rounded-2xl shadow-xl w-full max-w-6xl p-8 relative max-h-[90vh] flex flex-col">
+      <div className="bg-card border border-border rounded-2xl shadow-xl w-full max-w-7xl p-8 relative max-h-[90vh] flex flex-col">
         <button 
           onClick={onClose}
           disabled={isFinalizing}
@@ -38,16 +60,31 @@ export const ArchitectureRefinementModal: React.FC<ArchitectureRefinementModalPr
           <X size={24} />
         </button>
         
-        <h3 className="text-2xl font-black mb-3 flex items-center gap-3 text-primary">
-          <Sparkles size={28} />
-          아키텍처 설계 검토 및 구체화
-        </h3>
-        <p className="text-base text-muted-foreground mb-8">
-          AI가 제안한 초기 설계도입니다. 구조를 검토하고 수정 사항을 요청하거나, 바로 최종 적용하여 상세 내용을 생성하세요.
-        </p>
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h3 className="text-2xl font-black flex items-center gap-3 text-primary">
+              <Sparkles size={28} />
+              아키텍처 설계 검토 및 구체화
+            </h3>
+            <p className="text-base text-muted-foreground mt-1">
+              AI가 제안한 초기 설계도입니다. 구조를 검토하고 수정 사항을 요청하거나, 바로 최종 적용하여 상세 내용을 생성하세요.
+            </p>
+          </div>
+          <button 
+            onClick={() => setShowInsights(!showInsights)}
+            className={cn(
+              "px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all",
+              showInsights ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+            )}
+          >
+            <ShieldAlert size={18} />
+            AI 인사이트 {showInsights ? '숨기기' : '보기'}
+          </button>
+        </div>
 
-        {/* Blueprint Tree View */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar mb-8 bg-muted/30 rounded-2xl p-6 border border-border">
+        <div className="flex-1 flex gap-8 overflow-hidden mb-8">
+          {/* Blueprint Tree View */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar bg-muted/30 rounded-2xl p-6 border border-border">
           {blueprint.domains?.map((domain: any, dIdx: number) => (
             <div key={dIdx} className="mb-10 last:mb-0">
               <div className="flex items-start gap-4 mb-4">
@@ -85,6 +122,48 @@ export const ArchitectureRefinementModal: React.FC<ArchitectureRefinementModalPr
               </div>
             </div>
           ))}
+          </div>
+
+          {/* Insights Sidebar */}
+          <AnimatePresence>
+            {showInsights && (
+              <motion.div 
+                initial={{ opacity: 0, x: 20, width: 0 }}
+                animate={{ opacity: 1, x: 0, width: 320 }}
+                exit={{ opacity: 0, x: 20, width: 0 }}
+                className="flex flex-col gap-4 overflow-hidden"
+              >
+                <div className="bg-primary/5 border border-primary/10 rounded-2xl p-4 flex-1 overflow-y-auto custom-scrollbar">
+                  <h4 className="text-sm font-black text-primary flex items-center gap-2 mb-4">
+                    <ShieldAlert size={18} />
+                    Architecture Auditor
+                  </h4>
+                  
+                  {isFetchingInsights ? (
+                    <div className="flex flex-col items-center justify-center h-full gap-3 py-12">
+                      <Loader2 size={24} className="animate-spin text-primary/50" />
+                      <p className="text-xs text-muted-foreground">인사이트 분석 중...</p>
+                    </div>
+                  ) : insights.length > 0 ? (
+                    <div className="flex flex-col gap-4">
+                      {insights.map((insight, idx) => (
+                        <div key={idx} className="bg-card border border-border/50 p-4 rounded-xl shadow-sm">
+                          <div className="flex items-center gap-2 mb-2">
+                            <InsightIcon type={insight.type} />
+                            <span className="text-xs font-bold uppercase tracking-wider opacity-70">{insight.type}</span>
+                          </div>
+                          <h5 className="text-sm font-bold mb-1">{insight.title}</h5>
+                          <p className="text-xs text-muted-foreground leading-relaxed">{insight.description}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground text-center py-12">분석된 인사이트가 없습니다.</p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Interaction Area */}

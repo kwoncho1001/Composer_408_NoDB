@@ -1,6 +1,6 @@
 import React from 'react';
 import { Note, ProactiveNudge } from '../../types';
-import { Target, Receipt, Presentation, Swords, Sparkles, MessageSquarePlus, ChevronRight, Loader2, CheckCircle2, AlertCircle, CircleDashed, Clock, RefreshCw, X, Wrench, Lightbulb } from 'lucide-react';
+import { Target, Receipt, Presentation, Swords, Sparkles, MessageSquarePlus, ChevronRight, Loader2, CheckCircle2, AlertCircle, CircleDashed, Clock, RefreshCw, X, Wrench, Lightbulb, Rocket } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useCoFounder } from '../../contexts/CoFounderContext';
 
@@ -11,10 +11,16 @@ interface BentoViewProps {
   onRejectNudge: (nudgeId: string) => void;
   onRerollAllNudges: (mode?: 'auto' | 'keyword' | 'suggested') => void;
   onOpenAction: (action: string) => void;
+  magicIdea: string;
+  setMagicIdea: (val: string) => void;
+  onMagicStart: () => void;
+  isGeneratingMagic: boolean;
+  isGeneratingMindMap: boolean;
 }
 
 export const BentoView: React.FC<BentoViewProps> = ({ 
-  notes, onAcceptNudge, onSparringSubmit, onRejectNudge, onRerollAllNudges, onOpenAction 
+  notes, onAcceptNudge, onSparringSubmit, onRejectNudge, onRerollAllNudges, onOpenAction,
+  magicIdea, setMagicIdea, onMagicStart, isGeneratingMagic, isGeneratingMindMap
 }) => {
   const { nudges, isFetchingNudges, loadingNudgeTypes, applyingNudgeId, generationMode, setGenerationMode } = useCoFounder();
   const [sparringNudgeId, setSparringNudgeId] = React.useState<string | null>(null);
@@ -29,7 +35,50 @@ export const BentoView: React.FC<BentoViewProps> = ({
 
   return (
     <div className="h-full overflow-y-auto custom-scrollbar p-4 md:p-6">
-      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
+      <div className="max-w-7xl mx-auto space-y-6">
+        
+        {/* Blueprint Generator Input (Always visible in Executive view) */}
+        <div className="bg-card border border-border rounded-3xl p-6 shadow-sm relative overflow-hidden group">
+          <div className="absolute -inset-1 bg-gradient-to-r from-primary/10 via-purple-500/10 to-rose-500/10 rounded-3xl blur-xl opacity-50 group-hover:opacity-100 transition duration-1000"></div>
+          <div className="relative flex flex-col md:flex-row items-center gap-4">
+            <div className="flex-1 w-full">
+              <h3 className="text-sm font-black uppercase tracking-widest text-primary flex items-center gap-2 mb-3">
+                <Sparkles size={16} /> Blueprint Generator
+              </h3>
+              <div className="relative flex items-center bg-background border border-border rounded-2xl overflow-hidden focus-within:ring-2 focus-within:ring-primary/50 transition-all">
+                <input
+                  type="text"
+                  value={magicIdea}
+                  onChange={(e) => setMagicIdea(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') onMagicStart();
+                  }}
+                  placeholder="새로운 비즈니스 아이디어나 기능을 입력하세요..."
+                  className="flex-1 bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground/50"
+                  disabled={isGeneratingMagic}
+                />
+                <button
+                  onClick={onMagicStart}
+                  disabled={isGeneratingMagic || isGeneratingMindMap || !(magicIdea || '').trim()}
+                  className="bg-primary text-primary-foreground px-6 py-3 font-bold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isGeneratingMagic || isGeneratingMindMap ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Rocket size={16} />
+                  )}
+                  {isGeneratingMagic || isGeneratingMindMap ? "설계 중..." : "생성하기"}
+                </button>
+              </div>
+            </div>
+            <div className="hidden md:block w-px h-12 bg-border mx-2"></div>
+            <div className="text-xs text-muted-foreground max-w-[200px]">
+              아이디어를 입력하면 AI가 마인드맵을 통해 청사진을 그려드립니다.
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
         
         {/* Progress & Health */}
         <div className="col-span-1 md:col-span-2 lg:col-span-2 bg-card border border-border rounded-3xl p-4 md:p-6 shadow-sm flex flex-col justify-between">
@@ -89,7 +138,7 @@ export const BentoView: React.FC<BentoViewProps> = ({
           <div className="relative z-10">
             <div className="flex items-center justify-start gap-4 mb-6">
               <h3 className="text-sm font-black uppercase tracking-widest text-primary flex items-center gap-2">
-                <Sparkles size={16} /> AI CO-FOUNDER INSIGHTS
+                <Sparkles size={16} /> Strategic Advisor
               </h3>
               <div className="relative">
                 <button 
@@ -339,5 +388,6 @@ export const BentoView: React.FC<BentoViewProps> = ({
         </div>
       </div>
     </div>
+  </div>
   );
 };

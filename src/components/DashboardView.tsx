@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
-import { Note, CostEstimate, PitchDeck, CompetitorAnalysis, ProactiveNudge, LensType } from '../types';
-import { Layers, Blocks, Cpu, Code, AlertCircle, CheckCircle2, CircleDashed, Target, Loader2, X, Receipt, Cloud, Wrench, Zap, Presentation, FileText, Lightbulb, Users, Briefcase, Swords, Crosshair, ShieldAlert, Rocket, PlusCircle, Sparkles, MessageSquarePlus, ChevronRight, LayoutGrid, Map, Network } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Note, CostEstimate, PitchDeck, CompetitorAnalysis, ProactiveNudge, LensType, MindMap } from '../types';
+import { Layers, Blocks, Cpu, Code, AlertCircle, CheckCircle2, CircleDashed, Target, Loader2, X, Receipt, Cloud, Wrench, Zap, Presentation, FileText, Lightbulb, Users, Briefcase, Swords, Crosshair, ShieldAlert, Rocket, PlusCircle, Sparkles, MessageSquarePlus, ChevronRight, LayoutGrid, Map, Network, Check, Send } from 'lucide-react';
 import { ArchitectureRefinementModal } from './dashboard/ArchitectureRefinementModal';
 import { KeywordInputModal, SuggestedKeywordsModal } from './dashboard/GenerationModals';
-import { scopeMVP, estimateProjectCost, generatePitchDeck, analyzeCompetitor, generateInitialBlueprint, generateProactiveNudges, generateProactiveNudgesWithKeywords, addFeatureBlueprint, refineIdeaWithSparring, generateDetailedBlueprint, refineBlueprintDraft, generateKeywords } from '../services/gemini';
+import { scopeMVP, estimateProjectCost, generatePitchDeck, analyzeCompetitor, generateInitialBlueprint, generateProactiveNudges, generateProactiveNudgesWithKeywords, addFeatureBlueprint, refineIdeaWithSparring, generateDetailedBlueprint, refineBlueprintDraft, generateKeywords, generateMindMap, refineMindMap, generateArchitectureInsights, generateCodeSkeleton } from '../services/gemini';
 import * as dbManager from '../services/dbManager';
 import { saveNoteToSync } from '../services/syncManager';
 import ReactMarkdown from 'react-markdown';
@@ -15,6 +15,7 @@ import { useCoFounder } from '../contexts/CoFounderContext';
 import { JourneyView } from './dashboard/JourneyView';
 import { GalaxyView } from './dashboard/GalaxyView';
 import { BlueprintView } from './dashboard/BlueprintView';
+import { MindMapView } from './MindMapView';
 
 interface DashboardViewProps {
   projectId: string;
@@ -45,6 +46,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
 
   const [magicIdea, setMagicIdea] = useState('');
   const [isGeneratingMagic, setIsGeneratingMagic] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const [showMindMapModal, setShowMindMapModal] = useState(false);
+  const [isGeneratingMindMap, setIsGeneratingMindMap] = useState(false);
+  const [currentMindMap, setCurrentMindMap] = useState<MindMap | null>(null);
+  const [mindMapFeedback, setMindMapFeedback] = useState('');
 
   const [activeView, setActiveView] = useState<'bento' | 'journey' | 'galaxy' | 'blueprint'>('bento');
 
@@ -55,6 +62,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
   const [isRefiningBlueprint, setIsRefiningBlueprint] = useState(false);
   const [isFinalizingBlueprint, setIsFinalizingBlueprint] = useState(false);
   const [generationProgressMsg, setGenerationProgressMsg] = useState('');
+
+  const [architectureInsights, setArchitectureInsights] = useState<any[]>([]);
+  const [isFetchingInsights, setIsFetchingInsights] = useState(false);
+
+  const [showSkeletonModal, setShowSkeletonModal] = useState(false);
+  const [isGeneratingSkeleton, setIsGeneratingSkeleton] = useState(false);
+  const [codeSkeleton, setCodeSkeleton] = useState<any>(null);
+  const [selectedNoteForSkeleton, setSelectedNoteForSkeleton] = useState<Note | null>(null);
 
   const {
     nudges, setNudges,
@@ -69,6 +84,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
   const [showSuggestedModal, setShowSuggestedModal] = useState(false);
   const [suggestedKeywords, setSuggestedKeywords] = useState<string[]>([]);
   const [isGeneratingKeywords, setIsGeneratingKeywords] = useState(false);
+
+  useEffect(() => {
+    // Reset all AI-related states when project changes to ensure isolation
+    setMagicIdea('');
+    setIsGeneratingMagic(false);
+    setErrorMessage(null);
+    setShowMindMapModal(false);
+    setIsGeneratingMindMap(false);
+    setCurrentMindMap(null);
+    setMindMapFeedback('');
+    setShowRefinementModal(false);
+    setDraftBlueprint(null);
+    setRefiningNudge(null);
+    setIsRefiningBlueprint(false);
+    setIsFinalizingBlueprint(false);
+    setGenerationProgressMsg('');
+    setArchitectureInsights([]);
+    setIsFetchingInsights(false);
+    setShowSkeletonModal(false);
+    setIsGeneratingSkeleton(false);
+    setCodeSkeleton(null);
+    setSelectedNoteForSkeleton(null);
+  }, [projectId]);
 
   const handleOpenCoFounder = async () => {
     setIsCoFounderOpen(true);
@@ -182,7 +220,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
       }
     } catch (error) {
       console.error("Failed to refine idea with sparring:", error);
-      alert("아이디어 구체화에 실패했습니다. 다시 시도해주세요.");
+      setErrorMessage("아이디어 구체화에 실패했습니다. 다시 시도해주세요.");
     } finally {
       setApplyingNudgeId(null);
     }
@@ -196,10 +234,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
         setDraftBlueprint(blueprint);
         setRefiningNudge(nudge);
         setShowRefinementModal(true);
+
+        // Fetch insights in parallel for the new feature blueprint
+        setIsFetchingInsights(true);
+        generateArchitectureInsights(blueprint).then(res => {
+          setArchitectureInsights(res.insights || []);
+          setIsFetchingInsights(false);
+        }).catch(() => setIsFetchingInsights(false));
       }
     } catch (error) {
       console.error("Failed to generate blueprint:", error);
-      alert("설계도 생성에 실패했습니다.");
+      setErrorMessage("설계도 생성에 실패했습니다.");
     } finally {
       setApplyingNudgeId(null);
     }
@@ -211,9 +256,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
     try {
       const refined = await refineBlueprintDraft(draftBlueprint, feedback);
       setDraftBlueprint(refined);
+
+      // Re-fetch insights for refined blueprint
+      setIsFetchingInsights(true);
+      generateArchitectureInsights(refined).then(res => {
+        setArchitectureInsights(res.insights || []);
+        setIsFetchingInsights(false);
+      }).catch(() => setIsFetchingInsights(false));
     } catch (error) {
       console.error("Failed to refine blueprint:", error);
-      alert("설계 수정에 실패했습니다.");
+      setErrorMessage("설계 수정에 실패했습니다.");
     } finally {
       setIsRefiningBlueprint(false);
     }
@@ -247,11 +299,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
                   id: logicId,
                   projectId,
                   title: logic.title,
-                  content: logic.content || '',
+                  body: logic.content || '',
                   noteType: 'Logic',
                   parentNoteIds: [moduleId],
                   childNoteIds: [],
                   summary: logic.summary,
+                  businessRules: logic.businessRules,
+                  constraints: logic.constraints,
+                  ioMapping: logic.ioMapping,
+                  edgeCases: logic.edgeCases,
                   status: 'Planned',
                   priority: '3rd',
                   createdAt: Date.now(),
@@ -264,11 +320,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
               id: moduleId,
               projectId,
               title: mod.title,
-              content: mod.content || '',
+              body: mod.content || '',
               noteType: 'Module',
               parentNoteIds: [domainId],
               childNoteIds: moduleChildIds,
               summary: mod.summary,
+              uxGoals: mod.uxGoals,
+              requirements: mod.requirements,
+              userJourney: mod.userJourney,
+              ia: mod.ia,
               status: 'Planned',
               priority: '3rd',
               createdAt: Date.now(),
@@ -281,11 +341,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
           id: domainId,
           projectId,
           title: domain.title,
-          content: domain.content || '',
+          body: domain.content || '',
           noteType: 'Domain',
           parentNoteIds: [],
           childNoteIds: domainChildIds,
           summary: domain.summary,
+          vision: domain.vision,
+          boundaries: domain.boundaries,
+          stakeholders: domain.stakeholders,
+          kpis: domain.kpis,
           status: 'Planned',
           priority: '3rd',
           createdAt: Date.now(),
@@ -305,7 +369,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
       setRefiningNudge(null);
     } catch (error) {
       console.error("Failed to finalize blueprint:", error);
-      alert("최종 적용에 실패했습니다.");
+      setErrorMessage("최종 적용에 실패했습니다.");
     } finally {
       setIsFinalizingBlueprint(false);
       setGenerationProgressMsg('');
@@ -314,20 +378,77 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
 
   const handleMagicStart = async () => {
     if (!(magicIdea || '').trim()) return;
-    setIsGeneratingMagic(true);
+    setIsGeneratingMindMap(true);
+    setShowMindMapModal(true);
     try {
-      const blueprint = await generateInitialBlueprint((magicIdea || '').trim());
+      const mindMap = await generateMindMap((magicIdea || '').trim(), notes);
+      setCurrentMindMap(mindMap);
+    } catch (error) {
+      console.error("Mind Map generation failed:", error);
+      setErrorMessage("생각의 지도 생성에 실패했습니다.");
+      setShowMindMapModal(false);
+    } finally {
+      setIsGeneratingMindMap(false);
+    }
+  };
+
+  const handleRefineMindMap = async () => {
+    if (!currentMindMap || !mindMapFeedback.trim()) return;
+    setIsGeneratingMindMap(true);
+    try {
+      const refined = await refineMindMap(currentMindMap, mindMapFeedback);
+      setCurrentMindMap(refined);
+      setMindMapFeedback('');
+    } catch (error) {
+      console.error("Mind Map refinement failed:", error);
+      setErrorMessage("지도 수정에 실패했습니다.");
+    } finally {
+      setIsGeneratingMindMap(false);
+    }
+  };
+
+  const handleConfirmMindMap = async () => {
+    if (!currentMindMap) return;
+    setIsGeneratingMagic(true);
+    setShowMindMapModal(false);
+    try {
+      // Use the mind map summary and nodes to generate a better blueprint
+      const context = `Summary: ${currentMindMap.summary}\nNodes: ${JSON.stringify(currentMindMap.nodes)}`;
+      const blueprint = await generateInitialBlueprint(context);
       if (blueprint && blueprint.domains && blueprint.domains.length > 0) {
         setDraftBlueprint(blueprint);
         setRefiningNudge(null);
         setShowRefinementModal(true);
         setMagicIdea('');
+        
+        // Fetch insights in parallel
+        setIsFetchingInsights(true);
+        generateArchitectureInsights(blueprint).then(res => {
+          setArchitectureInsights(res.insights || []);
+          setIsFetchingInsights(false);
+        }).catch(() => setIsFetchingInsights(false));
       }
     } catch (error) {
-      console.error("Magic Start failed:", error);
-      alert("초기 기획 생성에 실패했습니다: " + (error as Error).message);
+      console.error("Blueprint generation failed:", error);
+      setErrorMessage("설계도 생성에 실패했습니다.");
     } finally {
       setIsGeneratingMagic(false);
+      setCurrentMindMap(null);
+    }
+  };
+
+  const handleGenerateSkeleton = async (note: Note) => {
+    setSelectedNoteForSkeleton(note);
+    setIsGeneratingSkeleton(true);
+    setShowSkeletonModal(true);
+    try {
+      const skeleton = await generateCodeSkeleton(note);
+      setCodeSkeleton(skeleton);
+    } catch (error) {
+      console.error("Failed to generate code skeleton:", error);
+      setErrorMessage("코드 스켈레톤 생성에 실패했습니다.");
+    } finally {
+      setIsGeneratingSkeleton(false);
     }
   };
 
@@ -390,7 +511,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
       if (onNotesChanged) onNotesChanged();
     } catch (error) {
       console.error("Failed to scope MVP:", error);
-      alert("MVP 스코핑에 실패했습니다: " + (error as Error).message);
+      setErrorMessage("MVP 스코핑에 실패했습니다: " + (error as Error).message);
     } finally {
       setIsScoping(false);
     }
@@ -405,7 +526,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
       setCostEstimate(estimate);
     } catch (error) {
       console.error("Failed to estimate cost:", error);
-      alert("비용 추정에 실패했습니다: " + (error as Error).message);
+      setErrorMessage("비용 추정에 실패했습니다: " + (error as Error).message);
       setShowCostModal(false);
     } finally {
       setIsEstimatingCost(false);
@@ -421,7 +542,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
       setPitchDeck(pitch);
     } catch (error) {
       console.error("Failed to generate pitch deck:", error);
-      alert("피치덱 생성에 실패했습니다: " + (error as Error).message);
+      setErrorMessage("피치덱 생성에 실패했습니다: " + (error as Error).message);
       setShowPitchModal(false);
     } finally {
       setIsGeneratingPitch(false);
@@ -436,7 +557,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
       setCompetitorAnalysis(analysis);
     } catch (error) {
       console.error("Failed to analyze competitor:", error);
-      alert("경쟁사 분석에 실패했습니다: " + (error as Error).message);
+      setErrorMessage("경쟁사 분석에 실패했습니다: " + (error as Error).message);
     } finally {
       setIsAnalyzingCompetitor(false);
     }
@@ -449,78 +570,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
     if (action === 'cost') setShowCostModal(true);
   };
 
-  if (notes.length === 0) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center p-8 relative overflow-hidden">
-        {/* Background decorations */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-primary/5 rounded-full blur-3xl -z-10"></div>
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-purple-500/5 rounded-full blur-2xl -z-10"></div>
-
-        <div className="max-w-2xl w-full text-center space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
-          <div className="space-y-4">
-            <div className="w-20 h-20 bg-primary/10 rounded-3xl flex items-center justify-center mx-auto mb-6 glow-primary shadow-2xl shadow-primary/20">
-              <Sparkles size={40} className="text-primary" />
-            </div>
-            <h2 className="text-4xl sm:text-5xl font-black tracking-tighter">
-              어떤 비즈니스를 만들고 싶으신가요?
-            </h2>
-            <p className="text-lg text-muted-foreground leading-relaxed max-w-xl mx-auto">
-              한 줄만 입력하세요. AI 코파운더가 Pitch Deck부터 핵심 로직까지<br />
-              당신의 비즈니스 청사진을 완벽하게 설계해 드립니다.
-            </p>
-          </div>
-
-          <div className="relative group max-w-xl mx-auto mt-12">
-            <div className="absolute -inset-1 bg-gradient-to-r from-primary via-purple-500 to-rose-500 rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
-            <div className="relative flex items-center bg-card border border-border rounded-2xl shadow-2xl overflow-hidden focus-within:ring-2 focus-within:ring-primary/50 transition-all">
-              <input
-                type="text"
-                value={magicIdea}
-                onChange={(e) => setMagicIdea(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleMagicStart();
-                }}
-                placeholder="예: 동네 빵집의 남은 빵을 마감 할인으로 판매하는 플랫폼"
-                className="flex-1 bg-transparent px-6 py-5 text-lg outline-none placeholder:text-muted-foreground/50"
-                disabled={isGeneratingMagic}
-                autoFocus
-              />
-              <button
-                onClick={handleMagicStart}
-                disabled={isGeneratingMagic || !(magicIdea || '').trim()}
-                className="bg-primary text-primary-foreground px-8 py-5 font-bold text-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
-                {isGeneratingMagic ? (
-                  <>
-                    <Loader2 size={24} className="animate-spin" />
-                    설계 중...
-                  </>
-                ) : (
-                  <>
-                    <Rocket size={24} />
-                    시작하기
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-
-          <div className="pt-12 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <span className="w-12 h-[1px] bg-border"></span>
-            <span>또는 이미 진행 중인 프로젝트가 있다면</span>
-            <span className="w-12 h-[1px] bg-border"></span>
-          </div>
-          
-          <p className="text-sm text-muted-foreground">
-            우측 패널에서 <strong className="text-foreground">GitHub Sync</strong>를 연결하여 코드를 동기화하세요.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="h-full flex flex-col relative bg-background">
+      {errorMessage && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-destructive text-destructive-foreground px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 z-50 animate-in slide-in-from-top-4">
+          <AlertCircle size={20} />
+          <span className="font-bold text-sm">{errorMessage}</span>
+          <button onClick={() => setErrorMessage(null)} className="ml-2 hover:opacity-70"><X size={16} /></button>
+        </div>
+      )}
       <div className="mb-4 md:mb-6 flex flex-col md:flex-row md:items-center justify-between px-4 md:px-6 pt-4 md:pt-6 gap-4">
         <div>
           <h2 className="text-xl md:text-2xl font-black tracking-tight">Business Command Center</h2>
@@ -563,6 +621,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
             onRejectNudge={handleRejectNudge}
             onRerollAllNudges={handleRerollAllNudges}
             onOpenAction={handleActionOpen}
+            magicIdea={magicIdea}
+            setMagicIdea={setMagicIdea}
+            onMagicStart={handleMagicStart}
+            isGeneratingMagic={isGeneratingMagic}
+            isGeneratingMindMap={isGeneratingMindMap}
           />
         )}
         {activeView === 'journey' && (
@@ -586,9 +649,95 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
           </div>
         )}
         {activeView === 'blueprint' && (
-          <BlueprintView notes={notes} onSelectNote={onSelectNote} />
+        <BlueprintView 
+          notes={notes} 
+          onSelectNote={onSelectNote} 
+          onGenerateSkeleton={handleGenerateSkeleton}
+        />
         )}
       </div>
+
+      {/* Mind Map Modal */}
+      {showMindMapModal && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-card border border-border shadow-2xl rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
+          >
+            <div className="p-6 border-b border-border flex items-center justify-between bg-muted/30">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+                  <Lightbulb size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black tracking-tight">생각의 지도 (Mirroring)</h3>
+                  <p className="text-xs text-muted-foreground">사용자의 아이디어를 AI가 이렇게 이해했습니다. 맞는지 확인해주세요.</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowMindMapModal(false)}
+                className="p-2 hover:bg-muted rounded-full transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {isGeneratingMindMap && !currentMindMap ? (
+                <div className="h-64 flex flex-col items-center justify-center gap-4">
+                  <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                  <p className="text-sm font-medium text-muted-foreground animate-pulse">아이디어를 분석하여 지도를 그리는 중...</p>
+                </div>
+              ) : currentMindMap ? (
+                <MindMapView mindMap={currentMindMap} />
+              ) : null}
+            </div>
+
+            <div className="p-6 border-t border-border bg-muted/30">
+              <div className="flex flex-col gap-4">
+                <div className="relative">
+                  <textarea
+                    value={mindMapFeedback}
+                    onChange={(e) => setMindMapFeedback(e.target.value)}
+                    placeholder="지도를 보고 수정하고 싶은 내용이나 추가하고 싶은 아이디어를 말씀해주세요."
+                    className="w-full bg-background border border-border rounded-2xl p-4 text-sm min-h-[100px] focus:ring-2 focus:ring-primary/20 transition-all resize-none"
+                  />
+                  <button
+                    onClick={handleRefineMindMap}
+                    disabled={isGeneratingMindMap || !mindMapFeedback.trim()}
+                    className="absolute bottom-3 right-3 px-4 py-2 bg-primary text-primary-foreground rounded-xl text-xs font-bold hover:opacity-90 disabled:opacity-50 transition-all flex items-center gap-2"
+                  >
+                    {isGeneratingMindMap ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Send size={14} />}
+                    지도 수정하기
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-[10px] text-muted-foreground">
+                    * 지도가 마음에 드신다면 '이대로 설계도 만들기'를 눌러주세요.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowMindMapModal(false)}
+                      className="px-6 py-3 rounded-2xl text-sm font-bold hover:bg-muted transition-all"
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={handleConfirmMindMap}
+                      disabled={isGeneratingMindMap || !currentMindMap}
+                      className="px-8 py-3 bg-primary text-primary-foreground rounded-2xl text-sm font-bold shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all flex items-center gap-2"
+                    >
+                      <Check size={18} />
+                      이대로 설계도 만들기
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       <ArchitectureRefinementModal
         isOpen={showRefinementModal}
@@ -599,7 +748,85 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ projectId, notes, 
         isRefining={isRefiningBlueprint}
         isFinalizing={isFinalizingBlueprint}
         progressMessage={generationProgressMsg}
+        insights={architectureInsights}
+        isFetchingInsights={isFetchingInsights}
       />
+
+      {/* Code Skeleton Modal */}
+      {showSkeletonModal && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-card border border-border shadow-2xl rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
+          >
+            <div className="p-6 border-b border-border flex items-center justify-between bg-muted/30">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-500">
+                  <Code size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black tracking-tight">코드 스켈레톤 (Boilerplate)</h3>
+                  <p className="text-xs text-muted-foreground">{selectedNoteForSkeleton?.title} 기능을 위한 초기 코드 구조입니다.</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowSkeletonModal(false);
+                  setCodeSkeleton(null);
+                }}
+                className="p-2 hover:bg-muted rounded-full transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 bg-muted/10">
+              {isGeneratingSkeleton ? (
+                <div className="h-64 flex flex-col items-center justify-center gap-4">
+                  <Loader2 size={48} className="animate-spin text-primary/50" />
+                  <p className="text-sm font-medium text-muted-foreground animate-pulse">코드 구조를 설계하는 중...</p>
+                </div>
+              ) : codeSkeleton && codeSkeleton.files ? (
+                <div className="space-y-6">
+                  {codeSkeleton.files.map((file: any, idx: number) => (
+                    <div key={idx} className="bg-background border border-border rounded-xl overflow-hidden shadow-sm">
+                      <div className="bg-muted/50 px-4 py-2 border-b border-border flex items-center justify-between">
+                        <span className="text-xs font-mono font-bold text-muted-foreground">{file.path}</span>
+                        <button 
+                          onClick={() => navigator.clipboard.writeText(file.content)}
+                          className="text-[10px] font-bold hover:text-primary transition-colors"
+                        >
+                          COPY
+                        </button>
+                      </div>
+                      <pre className="p-4 text-xs font-mono overflow-x-auto leading-relaxed">
+                        <code>{file.content}</code>
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
+                  <p>생성된 코드가 없습니다.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-border bg-muted/30 flex justify-end">
+              <button
+                onClick={() => {
+                  setShowSkeletonModal(false);
+                  setCodeSkeleton(null);
+                }}
+                className="px-8 py-3 bg-primary text-primary-foreground rounded-2xl text-sm font-bold shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
+              >
+                확인 완료
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {showScopingModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">

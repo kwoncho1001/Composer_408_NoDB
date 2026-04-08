@@ -63,14 +63,24 @@ export interface ProactiveNudge {
   actionPrompt: string;
 }
 
+export interface MindMapNode {
+  id: string;
+  label: string;
+  type: 'core' | 'feature' | 'technical' | 'market';
+  description?: string;
+  children?: MindMapNode[];
+}
+
+export interface MindMap {
+  nodes: MindMapNode[];
+  summary: string;
+}
+
 export interface Note {
   id: string;
   projectId: string;
   title: string;
   summary: string;
-  components?: string;
-  flow?: string;
-  io?: string;
   body: string;
   noteType: NoteType;
   status: NoteStatus;
@@ -78,6 +88,31 @@ export interface Note {
   lastUpdated: any; // Firestore Timestamp
   parentNoteIds: string[];
   childNoteIds: string[];
+  
+  // Domain specific
+  vision?: string;
+  boundaries?: string;
+  stakeholders?: string;
+  kpis?: string;
+  
+  // Module specific
+  uxGoals?: string;
+  requirements?: string;
+  userJourney?: string;
+  ia?: string;
+  
+  // Logic specific
+  businessRules?: string;
+  constraints?: string;
+  ioMapping?: string;
+  edgeCases?: string;
+  
+  // Snapshot specific
+  technicalRole?: string;
+  implementation?: string;
+  dependencies?: string;
+  executionFlow?: string;
+
   originPath?: string;
   startLine?: number;
   endLine?: number;

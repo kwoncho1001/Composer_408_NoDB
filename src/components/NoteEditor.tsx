@@ -223,6 +223,28 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
     }
   };
 
+  const renderField = (label: string, field: keyof Note, value: string | undefined, placeholder: string, colorClass: string) => (
+    <div className="bg-transparent sm:bg-muted/10 border-0 sm:border border-border/50 rounded-none sm:rounded-3xl p-0 sm:p-8 pl-4 sm:pl-8 space-y-3 sm:space-y-6 relative group">
+      <div className={`absolute top-0 left-0 w-1 h-full ${colorClass}/50 group-hover:${colorClass} transition-colors`}></div>
+      <label className="block text-sm sm:text-base font-bold text-foreground">
+        {label}
+      </label>
+      {isPreview ? (
+        <div className="markdown-body text-xs sm:text-sm bg-transparent sm:bg-background/30 border-0 sm:border border-border/30 rounded-none sm:rounded-2xl p-0 sm:p-5 overflow-y-auto custom-scrollbar">
+          <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{value || ''}</ReactMarkdown>
+        </div>
+      ) : (
+        <textarea 
+          value={value || ''} 
+          onChange={e => updateNote({[field]: e.target.value})}
+          maxLength={50000}
+          className="w-full h-48 bg-background/50 border border-border rounded-xl sm:rounded-2xl p-3 sm:p-5 text-xs sm:text-sm text-foreground/80 focus:ring-2 focus:ring-primary/20 outline-none resize-none leading-relaxed transition-all custom-scrollbar"
+          placeholder={placeholder}
+        />
+      )}
+    </div>
+  );
+
   const getFilePathForConflict = async () => {
     let filePath = note?.originPath;
     if (!filePath || filePath === '/') {
@@ -255,9 +277,10 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
       const nextNote = { 
         ...note, 
         summary: businessLogic.summary,
-        components: businessLogic.components,
-        flow: businessLogic.flow,
-        io: businessLogic.io,
+        businessRules: businessLogic.businessRules,
+        constraints: businessLogic.constraints,
+        ioMapping: businessLogic.ioMapping,
+        edgeCases: businessLogic.edgeCases,
         status: 'Done' as NoteStatus,
         priority: 'Done' as NotePriority,
         conflictDetails: null,
@@ -777,64 +800,60 @@ export const NoteEditor = ({ noteId, projectId, onSaved, onDeleted }: { noteId: 
           </div>
 
           <div className="bg-transparent sm:bg-muted/10 border-0 sm:border border-border/50 rounded-none sm:rounded-3xl p-0 sm:p-8 pl-4 sm:pl-8 space-y-3 sm:space-y-6 relative group">
-            <div className="absolute top-0 left-0 w-1 h-full bg-blue-500/50 group-hover:bg-blue-500 transition-colors"></div>
+            <div className="absolute top-0 left-0 w-1 h-full bg-orange-500/50 group-hover:bg-orange-500 transition-colors"></div>
             <label className="block text-sm sm:text-base font-bold text-foreground">
-              2. {note.noteType === 'Snapshot' ? '기술적 구성 요소' : '비즈니스 구성 요소'}
+              2. {note.noteType === 'Snapshot' ? '상세 분석' : '상세 설명'}
             </label>
             {isPreview ? (
               <div className="markdown-body text-xs sm:text-sm bg-transparent sm:bg-background/30 border-0 sm:border border-border/30 rounded-none sm:rounded-2xl p-0 sm:p-5 overflow-y-auto custom-scrollbar">
-                <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{note.components || ''}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{note.body || ''}</ReactMarkdown>
               </div>
             ) : (
               <textarea 
-                value={note.components || ''} 
-                onChange={e => updateNote({components: e.target.value})}
-                maxLength={50000}
-                className="w-full h-48 bg-background/50 border border-border rounded-xl sm:rounded-2xl p-3 sm:p-5 text-xs sm:text-sm text-foreground/80 focus:ring-2 focus:ring-primary/20 outline-none resize-none leading-relaxed transition-all custom-scrollbar"
-                placeholder={note.noteType === 'Snapshot' ? "실제 코드에 존재하는 물리적 부품들을 나열합니다 (라이브러리, 변수, 함수 등)..." : "이 로직에서 다루는 주요 개념적 단위들을 나열합니다..."}
-              />
-            )}
-          </div>
-
-          <div className="bg-transparent sm:bg-muted/10 border-0 sm:border border-border/50 rounded-none sm:rounded-3xl p-0 sm:p-8 pl-4 sm:pl-8 space-y-3 sm:space-y-6 relative group">
-            <div className="absolute top-0 left-0 w-1 h-full bg-green-500/50 group-hover:bg-green-500 transition-colors"></div>
-            <label className="block text-sm sm:text-base font-bold text-foreground">
-              3. {note.noteType === 'Snapshot' ? '데이터/실행 흐름' : '논리적 흐름'}
-            </label>
-            {isPreview ? (
-              <div className="markdown-body text-xs sm:text-sm bg-transparent sm:bg-background/30 border-0 sm:border border-border/30 rounded-none sm:rounded-2xl p-0 sm:p-5 overflow-y-auto custom-scrollbar">
-                <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{note.flow || ''}</ReactMarkdown>
-              </div>
-            ) : (
-              <textarea 
-                value={note.flow || ''} 
-                onChange={e => updateNote({flow: e.target.value})}
+                value={note.body || ''} 
+                onChange={e => updateNote({body: e.target.value})}
                 maxLength={50000}
                 className="w-full h-64 bg-background/50 border border-border rounded-xl sm:rounded-2xl p-3 sm:p-5 text-xs sm:text-sm text-foreground/80 focus:ring-2 focus:ring-primary/20 outline-none resize-none leading-relaxed transition-all custom-scrollbar"
-                placeholder={note.noteType === 'Snapshot' ? "코드의 실제 실행 순서와 데이터가 변하는 과정을 기록합니다..." : "코드가 아닌 '사람의 행동/의사결정' 순서로 설명합니다..."}
+                placeholder="AI가 생성한 상세한 비즈니스 설명과 작동 규칙입니다..."
               />
             )}
           </div>
 
-          <div className="bg-transparent sm:bg-muted/10 border-0 sm:border border-border/50 rounded-none sm:rounded-3xl p-0 sm:p-8 pl-4 sm:pl-8 space-y-3 sm:space-y-6 relative group">
-            <div className="absolute top-0 left-0 w-1 h-full bg-purple-500/50 group-hover:bg-purple-500 transition-colors"></div>
-            <label className="block text-sm sm:text-base font-bold text-foreground">
-              4. {note.noteType === 'Snapshot' ? '기술적 입출력' : '비즈니스 입출력'}
-            </label>
-            {isPreview ? (
-              <div className="markdown-body text-xs sm:text-sm bg-transparent sm:bg-background/30 border-0 sm:border border-border/30 rounded-none sm:rounded-2xl p-0 sm:p-5 overflow-y-auto custom-scrollbar">
-                <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{note.io || ''}</ReactMarkdown>
-              </div>
-            ) : (
-              <textarea 
-                value={note.io || ''} 
-                onChange={e => updateNote({io: e.target.value})}
-                maxLength={50000}
-                className="w-full h-32 bg-background/50 border border-border rounded-xl sm:rounded-2xl p-3 sm:p-5 text-xs sm:text-sm text-foreground/80 focus:ring-2 focus:ring-primary/20 outline-none resize-none leading-relaxed transition-all custom-scrollbar"
-                placeholder={note.noteType === 'Snapshot' ? "입력(Parameters)과 출력(Returns)을 명시합니다..." : "입력(Input)과 출력(Output)을 명시합니다..."}
-              />
-            )}
-          </div>
+          {note.noteType === 'Domain' && (
+            <>
+              {renderField('3. 비즈니스 비전 (Vision)', 'vision', note.vision, '이 영역이 해결하려는 궁극적인 문제와 가치...', 'bg-blue-500')}
+              {renderField('4. 서비스 경계 (Boundaries)', 'boundaries', note.boundaries, '포함되는 기능과 포함되지 않는 기능...', 'bg-green-500')}
+              {renderField('5. 핵심 이해관계자 (Stakeholders)', 'stakeholders', note.stakeholders, '주요 사용자 페르소나와 시스템 액터...', 'bg-purple-500')}
+              {renderField('6. 성공 지표 (KPIs)', 'kpis', note.kpis, '비즈니스 성공을 판단할 수 있는 지표...', 'bg-pink-500')}
+            </>
+          )}
+
+          {note.noteType === 'Module' && (
+            <>
+              {renderField('3. 사용자 목표 (UX Goals)', 'uxGoals', note.uxGoals, '사용자가 달성하고자 하는 목표...', 'bg-blue-500')}
+              {renderField('4. 기능적 요구사항 (Requirements)', 'requirements', note.requirements, '반드시 수행해야 하는 기능 리스트...', 'bg-green-500')}
+              {renderField('5. 사용자 여정 (User Journey)', 'userJourney', note.userJourney, '사용자가 기능을 사용하는 시나리오...', 'bg-purple-500')}
+              {renderField('6. 정보 구조 (IA)', 'ia', note.ia, '주요 데이터 객체들의 관계...', 'bg-pink-500')}
+            </>
+          )}
+
+          {note.noteType === 'Logic' && (
+            <>
+              {renderField('3. 의사결정 규칙 (Business Rules)', 'businessRules', note.businessRules, '만약 ~라면 ~한다 식의 로직...', 'bg-blue-500')}
+              {renderField('4. 제약 조건 (Constraints)', 'constraints', note.constraints, '데이터 유효성, 보안 규칙...', 'bg-green-500')}
+              {renderField('5. 데이터 입출력 매핑 (I/O Mapping)', 'ioMapping', note.ioMapping, '입력값이 결과값으로 변하는 과정...', 'bg-purple-500')}
+              {renderField('6. 예외 처리 (Edge Cases)', 'edgeCases', note.edgeCases, '비정상 상황 대응 규칙...', 'bg-pink-500')}
+            </>
+          )}
+
+          {note.noteType === 'Snapshot' && (
+            <>
+              {renderField('3. 기술적 역할 (Technical Role)', 'technicalRole', note.technicalRole, '시스템 내에서의 기술적 책임...', 'bg-blue-500')}
+              {renderField('4. 구현 상세 분석 (Implementation)', 'implementation', note.implementation, '알고리즘, 디자인 패턴 설명...', 'bg-green-500')}
+              {renderField('5. 의존성 및 구성 요소 (Dependencies)', 'dependencies', note.dependencies, '라이브러리, DB, API 연동...', 'bg-purple-500')}
+              {renderField('6. 실행 및 데이터 흐름 (Execution Flow)', 'executionFlow', note.executionFlow, '함수 호출 순서와 데이터 변이...', 'bg-pink-500')}
+            </>
+          )}
           </div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState } from 'react';
-import { ProactiveNudge } from '../types';
+import { ProactiveNudge, MindMap } from '../types';
 
 export type GenerationMode = 'auto' | 'keyword' | 'suggested';
 
@@ -18,6 +18,10 @@ interface CoFounderContextType {
   setApplyingNudgeId: React.Dispatch<React.SetStateAction<string | null>>;
   generationMode: GenerationMode;
   setGenerationMode: React.Dispatch<React.SetStateAction<GenerationMode>>;
+  mindMap: MindMap | null;
+  setMindMap: React.Dispatch<React.SetStateAction<MindMap | null>>;
+  isGeneratingMindMap: boolean;
+  setIsGeneratingMindMap: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 const CoFounderContext = createContext<CoFounderContextType | undefined>(undefined);
@@ -30,6 +34,8 @@ export const CoFounderProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [isCoFounderOpen, setIsCoFounderOpen] = useState(false);
   const [applyingNudgeId, setApplyingNudgeId] = useState<string | null>(null);
   const [generationMode, setGenerationMode] = useState<GenerationMode>('auto');
+  const [mindMap, setMindMap] = useState<MindMap | null>(null);
+  const [isGeneratingMindMap, setIsGeneratingMindMap] = useState(false);
 
   return (
     <CoFounderContext.Provider value={{
@@ -39,7 +45,9 @@ export const CoFounderProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       isFetchingNudges, setIsFetchingNudges,
       isCoFounderOpen, setIsCoFounderOpen,
       applyingNudgeId, setApplyingNudgeId,
-      generationMode, setGenerationMode
+      generationMode, setGenerationMode,
+      mindMap, setMindMap,
+      isGeneratingMindMap, setIsGeneratingMindMap
     }}>
       {children}
     </CoFounderContext.Provider>

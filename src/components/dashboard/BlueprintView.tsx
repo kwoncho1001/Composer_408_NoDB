@@ -6,9 +6,10 @@ import { motion } from 'motion/react';
 interface BlueprintViewProps {
   notes: Note[];
   onSelectNote: (id: string) => void;
+  onGenerateSkeleton?: (note: Note) => void;
 }
 
-export const BlueprintView: React.FC<BlueprintViewProps> = ({ notes, onSelectNote }) => {
+export const BlueprintView: React.FC<BlueprintViewProps> = ({ notes, onSelectNote, onGenerateSkeleton }) => {
   const domains = notes.filter(n => n.noteType === 'Domain');
   const modules = notes.filter(n => n.noteType === 'Module');
   const logics = notes.filter(n => n.noteType === 'Logic');
@@ -87,13 +88,24 @@ export const BlueprintView: React.FC<BlueprintViewProps> = ({ notes, onSelectNot
                 <div className="flex gap-6 overflow-x-auto pb-6 custom-scrollbar snap-x">
                   {getChildren(domain.id, 'Module').map((mod) => (
                     <div key={mod.id} className="flex-none w-[400px] bg-muted/30 rounded-[2rem] p-6 border border-border/50 hover:border-purple-500/30 transition-colors snap-start">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2.5 bg-purple-500/10 rounded-2xl text-purple-500">
-                          <Blocks size={22} />
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2.5 bg-purple-500/10 rounded-2xl text-purple-500">
+                            <Blocks size={22} />
+                          </div>
+                          <h5 className="font-black text-lg cursor-pointer hover:text-purple-500 transition-colors" onClick={() => onSelectNote(mod.id)}>
+                            {mod.title}
+                          </h5>
                         </div>
-                        <h5 className="font-black text-lg cursor-pointer hover:text-purple-500 transition-colors" onClick={() => onSelectNote(mod.id)}>
-                          {mod.title}
-                        </h5>
+                        {onGenerateSkeleton && (
+                          <button 
+                            onClick={() => onGenerateSkeleton(mod)}
+                            className="p-2 hover:bg-purple-500/10 rounded-xl text-purple-500 transition-colors"
+                            title="코드 스켈레톤 생성"
+                          >
+                            <Code size={18} />
+                          </button>
+                        )}
                       </div>
                       <p className="text-sm text-muted-foreground mb-6 leading-relaxed line-clamp-2">{mod.summary}</p>
                       

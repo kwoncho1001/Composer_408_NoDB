@@ -171,16 +171,17 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
       }
 
       addLog(`Generating Module details using AI...`);
-      const generatedModules: { id: string, title: string, summary: string, components: string, flow: string, io: string, logicIds: string[] }[] = [];
+      const generatedModules: { id: string, title: string, summary: string, uxGoals: string, requirements: string, userJourney: string, ia: string, logicIds: string[] }[] = [];
       
       const clusterPromises = Object.entries(clusters).map(async ([clusterId, logics], idx) => {
         if (cancelSyncRef.current) return;
         const logicsData = logics.map(l => ({ 
           title: l.title, 
           summary: l.summary,
-          components: l.components,
-          flow: l.flow,
-          io: l.io
+          businessRules: l.businessRules,
+          constraints: l.constraints,
+          ioMapping: l.ioMapping,
+          edgeCases: l.edgeCases
         }));
         const moduleData = await generateModuleFromCluster(logicsData);
         generatedModules.push({
@@ -198,9 +199,10 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
         id: m.id, 
         title: m.title, 
         summary: m.summary,
-        components: m.components,
-        flow: m.flow,
-        io: m.io
+        uxGoals: m.uxGoals,
+        requirements: m.requirements,
+        userJourney: m.userJourney,
+        ia: m.ia
       }));
       const domainsBlueprint = await generateDomainsFromModules(modulesData);
 
@@ -229,9 +231,10 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
           title: domainData.title.substring(0, 200),
           projectId,
           summary: domainData.summary || '',
-          components: domainData.components || '',
-          flow: domainData.flow || '',
-          io: domainData.io || '',
+          vision: domainData.vision || '',
+          boundaries: domainData.boundaries || '',
+          stakeholders: domainData.stakeholders || '',
+          kpis: domainData.kpis || '',
           body: '',
           noteType: 'Domain',
           status: 'Planned',
@@ -259,9 +262,10 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
               title: moduleData.title.substring(0, 200),
               projectId,
               summary: moduleData.summary || '',
-              components: moduleData.components || '',
-              flow: moduleData.flow || '',
-              io: moduleData.io || '',
+              uxGoals: moduleData.uxGoals || '',
+              requirements: moduleData.requirements || '',
+              userJourney: moduleData.userJourney || '',
+              ia: moduleData.ia || '',
               body: '',
               noteType: 'Module',
               status: 'Planned',
@@ -476,16 +480,18 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
                 item.businessLogic = {
                   title: parentLogic.title,
                   summary: parentLogic.summary,
-                  components: parentLogic.components,
-                  flow: parentLogic.flow,
-                  io: parentLogic.io
+                  businessRules: parentLogic.businessRules,
+                  constraints: parentLogic.constraints,
+                  ioMapping: parentLogic.ioMapping,
+                  edgeCases: parentLogic.edgeCases
                 };
                 item.analysis = {
                   title: cachedNote.title,
                   summary: cachedNote.summary,
-                  components: cachedNote.components,
-                  flow: cachedNote.flow,
-                  io: cachedNote.io
+                  technicalRole: cachedNote.technicalRole,
+                  implementation: cachedNote.implementation,
+                  dependencies: cachedNote.dependencies,
+                  executionFlow: cachedNote.executionFlow
                 };
                 item.caseType = '4-1';
                 item.targetLogicB = parentLogic;
@@ -660,9 +666,10 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
               if (!isConflict && !result.isCacheHit) {
                 logicUpdates.title = businessLogic.title.substring(0, 200);
                 logicUpdates.summary = businessLogic.summary;
-                logicUpdates.components = businessLogic.components;
-                logicUpdates.flow = businessLogic.flow;
-                logicUpdates.io = businessLogic.io;
+                logicUpdates.businessRules = businessLogic.businessRules;
+                logicUpdates.constraints = businessLogic.constraints;
+                logicUpdates.ioMapping = businessLogic.ioMapping;
+                logicUpdates.edgeCases = businessLogic.edgeCases;
               }
 
               await dbManager.saveNote(logicUpdates);
@@ -673,9 +680,10 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
                 projectId,
                 summary: analysis.summary,
                 body: unit.code || '',
-                components: analysis.components,
-                flow: analysis.flow,
-                io: analysis.io,
+                technicalRole: analysis.technicalRole,
+                implementation: analysis.implementation,
+                dependencies: analysis.dependencies,
+                executionFlow: analysis.executionFlow,
                 noteType: 'Snapshot',
                 status: 'Done',
                 priority: 'Done',
@@ -698,9 +706,10 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
                 ...targetLogicB,
                 title: businessLogic.title.substring(0, 200),
                 summary: businessLogic.summary,
-                components: businessLogic.components,
-                flow: businessLogic.flow,
-                io: businessLogic.io,
+                businessRules: businessLogic.businessRules,
+                constraints: businessLogic.constraints,
+                ioMapping: businessLogic.ioMapping,
+                edgeCases: businessLogic.edgeCases,
                 status: isConflict ? 'Conflict' : 'Done',
                 lastUpdated: new Date().toISOString(),
                 uid: user.uid,
@@ -723,9 +732,10 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
                 projectId,
                 summary: analysis.summary,
                 body: unit.code || '',
-                components: analysis.components,
-                flow: analysis.flow,
-                io: analysis.io,
+                technicalRole: analysis.technicalRole,
+                implementation: analysis.implementation,
+                dependencies: analysis.dependencies,
+                executionFlow: analysis.executionFlow,
                 noteType: 'Snapshot',
                 status: 'Done',
                 priority: 'Done',
@@ -751,9 +761,10 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
                 projectId,
                 summary: businessLogic.summary,
                 body: '',
-                components: businessLogic.components,
-                flow: businessLogic.flow,
-                io: businessLogic.io,
+                businessRules: businessLogic.businessRules,
+                constraints: businessLogic.constraints,
+                ioMapping: businessLogic.ioMapping,
+                edgeCases: businessLogic.edgeCases,
                 noteType: 'Logic',
                 status: 'Done',
                 priority: 'Done',
@@ -779,9 +790,10 @@ export const GitHubSync = ({ onClose, projectId, onSyncComplete, activeLens, set
                 projectId,
                 summary: analysis.summary,
                 body: unit.code || '',
-                components: analysis.components,
-                flow: analysis.flow,
-                io: analysis.io,
+                technicalRole: analysis.technicalRole,
+                implementation: analysis.implementation,
+                dependencies: analysis.dependencies,
+                executionFlow: analysis.executionFlow,
                 noteType: 'Snapshot',
                 status: 'Done',
                 priority: 'Done',

@@ -1,12 +1,225 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { Note, ProactiveNudge } from "../types";
+import { Note, ProactiveNudge, MindMap } from "../types";
 import { withTimeout } from "../lib/utils";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+// Override generateContent with exponential backoff retry logic
+const originalGenerateContent = ai.models.generateContent.bind(ai.models);
+ai.models.generateContent = async (params: any) => {
+  let attempt = 0;
+  const maxAttempts = 3;
+  while (attempt < maxAttempts) {
+    try {
+      return await originalGenerateContent(params);
+    } catch (error: any) {
+      attempt++;
+      if (error?.status === 503 || error?.status === 429 || error?.message?.includes('503') || error?.message?.includes('429')) {
+        if (attempt >= maxAttempts) throw error;
+        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+        console.warn(`Gemini API error (${error.status || 'unknown'}), retrying in ${Math.round(delay)}ms... (Attempt ${attempt}/${maxAttempts})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+  throw new Error("Max retries reached");
+};
+
 const MODEL = "gemini-3.1-flash-lite-preview";
 const PRO_MODEL = "gemini-3.1-flash-lite-preview";
 
-// Phase 0: Market-Fit Validator (초기 뼈대 자동 생성)
+export const generateMindMap = async (userInput: string, existingNotes: Note[]) => {
+  const prompt = `당신은 사용자의 모호한 아이디어를 구체적인 비즈니스 지도로 변환해주는 '공감적 경청' 전문가입니다.
+사용자의 입력과 현재 프로젝트의 맥락을 분석하여 '생각의 지도(Mind Map)'를 작성하세요.
+
+[사용자 입력]
+${userInput}
+
+[현재 프로젝트 맥락]
+${existingNotes.map(n => `- ${n.title}: ${n.summary}`).join('\n')}
+
+[작성 지침]
+1. 사용자의 의도를 '핵심 가치(core)', '주요 기능(feature)', '기술적 요소(technical)', '시장/비즈니스(market)' 4가지 유형으로 분류하세요.
+2. 각 노드는 짧고 직관적인 레이블(label)과 간단한 설명(description)을 포함해야 합니다.
+3. 계층 구조(children)를 활용하여 연관된 생각들을 묶어주세요.
+4. 전체적인 지도를 아우르는 한 줄 요약(summary)을 작성하세요.
+
+반드시 아래 JSON 형식으로만 응답하세요:
+{
+  "summary": "전체적인 생각의 지도 요약",
+  "nodes": [
+    {
+      "id": "unique_id",
+      "label": "노드 이름",
+      "type": "core | feature | technical | market",
+      "description": "간단한 설명",
+      "children": []
+    }
+  ]
+}`;
+
+  const responsePromise = ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          summary: { type: Type.STRING },
+          nodes: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                label: { type: Type.STRING },
+                type: { type: Type.STRING, enum: ["core", "feature", "technical", "market"] },
+                description: { type: Type.STRING },
+                children: { type: Type.ARRAY, items: { type: Type.OBJECT } } // Recursive structure handled by AI
+              },
+              required: ["id", "label", "type"]
+            }
+          }
+        },
+        required: ["summary", "nodes"]
+      }
+    }
+  });
+
+  const response = await withTimeout(responsePromise, 30000, { text: "{}" } as any);
+  try {
+    return JSON.parse(response.text || "{}");
+  } catch (e) {
+    console.error("Failed to generate mind map", e);
+    return { summary: "분석 실패", nodes: [] };
+  }
+};
+
+// Phase 1+: Mirroring Refinement (지도를 바탕으로 아이디어 수정)
+export const refineMindMap = async (currentMindMap: MindMap, feedback: string) => {
+  const prompt = `당신은 사용자의 피드백을 반영하여 생각의 지도를 실시간으로 수정하는 전문가입니다.
+
+[현재 생각의 지도]
+${JSON.stringify(currentMindMap, null, 2)}
+
+[사용자 피드백]
+${feedback}
+
+[작성 지침]
+1. 사용자의 피드백을 반영하여 노드를 추가, 삭제, 수정하거나 위치를 변경하세요.
+2. 수정된 전체 지도를 다시 JSON 형식으로 반환하세요.
+
+반드시 아래 JSON 형식으로만 응답하세요:
+{
+  "summary": "수정된 생각의 지도 요약",
+  "nodes": [...]
+}`;
+
+  const responsePromise = ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json"
+    }
+  });
+
+  const response = await withTimeout(responsePromise, 30000, { text: "{}" } as any);
+  try {
+    return JSON.parse(response.text || "{}");
+  } catch (e) {
+    console.error("Failed to refine mind map", e);
+    return currentMindMap;
+  }
+};
+
+// Phase 2+: Architecture Insights (Devil's Advocate)
+export const generateArchitectureInsights = async (blueprint: any) => {
+  const prompt = `당신은 비즈니스 아키텍처의 허점을 찾아내고 현실적인 제언을 하는 '악마의 대변인(Devil's Advocate)'이자 기술 코파운더입니다.
+제시된 설계도를 분석하여 3가지 핵심 인사이트를 제공하세요.
+
+[현재 설계도]
+${JSON.stringify(blueprint, null, 2)}
+
+[작성 지침]
+1. '현실적 제약(Constraint)', '잠재적 위험(Risk)', '확장성 제언(Scalability)' 3가지 관점에서 분석하세요.
+2. 무조건 칭찬하지 말고, 비판적이고 현실적인 시각을 유지하세요.
+3. 각 인사이트는 제목과 상세 설명으로 구성하세요.
+
+반드시 아래 JSON 형식으로만 응답하세요:
+{
+  "insights": [
+    {
+      "type": "constraint | risk | scalability",
+      "title": "인사이트 제목",
+      "description": "상세 설명 및 대안 제언"
+    }
+  ]
+}`;
+
+  const responsePromise = ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json"
+    }
+  });
+
+  const response = await withTimeout(responsePromise, 30000, { text: "{}" } as any);
+  try {
+    return JSON.parse(response.text || "{}");
+  } catch (e) {
+    console.error("Failed to generate architecture insights", e);
+    return { insights: [] };
+  }
+};
+
+// Phase 3+: Code Skeleton Generation
+export const generateCodeSkeleton = async (note: Note) => {
+  const prompt = `당신은 설계도를 바탕으로 실제 개발에 필요한 Boilerplate 코드를 생성하는 기술 코파운더입니다.
+제시된 노드의 내용을 분석하여 TypeScript 인터페이스와 서비스 구조를 생성하세요.
+
+[노드 정보]
+타입: ${note.noteType}
+제목: ${note.title}
+요약: ${note.summary}
+상세 내용: ${note.body}
+
+[작성 지침]
+1. TypeScript를 사용하세요.
+2. 실제 구현보다는 인터페이스(Interface), 타입(Type), 그리고 함수 시그니처(Function Signature) 위주로 작성하세요.
+3. 주석을 통해 각 부분의 역할을 설명하세요.
+4. 파일 구조 제안을 포함하세요.
+
+반드시 아래 JSON 형식으로만 응답하세요:
+{
+  "files": [
+    {
+      "path": "src/types/...",
+      "content": "..."
+    }
+  ]
+}`;
+
+  const responsePromise = ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json"
+    }
+  });
+
+  const response = await withTimeout(responsePromise, 30000, { text: "{}" } as any);
+  try {
+    return JSON.parse(response.text || "{}");
+  } catch (e) {
+    console.error("Failed to generate code skeleton", e);
+    return { files: [] };
+  }
+};
+
 export const generateInitialBlueprint = async (businessIdea: string) => {
   const prompt = `당신은 비전공자 창업자를 돕는 세계 최고의 비즈니스 파트너이자 기술 가이드입니다.
 사용자의 비즈니스 아이디어를 바탕으로 서비스의 초기 설계도(Blueprint)를 작성하세요.
@@ -21,7 +234,11 @@ ${businessIdea}
    - Module -> '세부 기능' (예: '프로필 편집하기')
    - Logic -> '핵심 규칙' (예: '사진 용량 줄여서 저장하기')
 3. 각 항목의 제목과 요약은 '이 기능이 왜 필요한지'와 '사용자가 얻는 이득'이 드러나게 작성하세요.
-4. 구조는 반드시 domains -> modules -> logics 계층 구조여야 합니다.
+4. **구조의 풍부함**: 아이디어의 잠재력을 최대한 끌어내어, 비즈니스가 실제로 작동하기 위해 필요한 모든 측면을 고려하세요. 
+   - 단순히 1~2개의 영역이 아니라, 사용자 경험, 운영 관리, 데이터 분석, 마케팅 등 다양한 관점에서 '주요 영역(Domain)'을 도출하세요.
+   - 각 영역 내에서도 서비스의 완성도를 높일 수 있는 '세부 기능(Module)'과 '핵심 규칙(Logic)'을 충분히 구성하세요.
+   - 구조가 부실하지 않도록, 실제 상용 서비스 수준의 체계적인 설계를 지향하세요.
+5. 구조는 반드시 domains -> modules -> logics 계층 구조여야 합니다.
 
 반드시 아래 JSON 형식으로만 응답하세요:
 {
@@ -159,16 +376,16 @@ export const analyzeLogicUnit = async (title: string, codeSnippet: string) => {
 
 가독성을 극대화하기 위해 다음 규칙을 엄격히 준수하세요:
 1. 모든 항목은 마크다운(Markdown) 형식을 사용하세요.
-2. 'flow'와 'components'는 반드시 마크다운 리스트(- 또는 1.) 형식을 사용하세요. 가독성을 위해 리스트 항목(1. 2. 3. 등) 사이에는 **반드시 빈 줄(Empty Line)을 하나씩 삽입**하세요. (Loose List 형태)
-3. 'summary'와 'io'도 정보가 많을 경우 줄바꿈을 적극적으로 사용하세요.
-4. 전문 용어는 가급적 그대로 사용하되, 설명은 친절하게 작성하세요.
+2. 리스트 항목 사이에는 **반드시 빈 줄(Empty Line)을 하나씩 삽입**하세요.
+3. 전문 용어는 가급적 그대로 사용하되, 설명은 친절하게 작성하세요.
 
-다음 5가지 항목을 추출하세요:
-1. title (기술적 제목): '핵심 기능 + 기술' (구현 중심) 형식으로 작성하되, 단일 책임 원칙에 따라 '가장 핵심적인 단 하나의 기능'만 명시하세요. 'A 및 B', 'A와 B'처럼 여러 기능을 나열하지 마세요. (예: 'ensurePathNode: 계층 경로 동기화', 'updateStock: 트랜잭션 기반 재고 처리')
-2. summary (기술적 역할): 이 코드 조각의 기술적인 핵심 기능을 한 문장으로 정의하세요.
-3. components (기술적 구성 요소): 실제 코드에 존재하는 물리적 부품들(라이브러리, 주요 변수/상태, 핵심 함수 등)을 리스트 형태로 나열하세요.
-4. flow (데이터/실행 흐름): 코드의 실제 실행 순서와 데이터가 변하는 과정을 번호를 매겨 상세히 기록하세요. 각 단계 사이에는 반드시 빈 줄을 삽입하세요.
-5. io (기술적 입출력): 입력(Parameters)과 출력(Returns)을 명시하세요. 항목별로 줄바꿈을 사용하세요.
+다음 6가지 항목을 추출하세요:
+1. title (제목): 이 로직 단위를 가장 잘 설명하는 직관적인 제목.
+2. summary (요약): 이 로직 단위가 하는 일을 한 줄로 요약.
+3. technicalRole (기술적 역할): 이 코드 조각의 기술적인 핵심 기능과 역할을 한 문장으로 정의하세요.
+4. implementation (구현 상세): 코드의 실제 구현 방식, 알고리즘, 주요 로직을 상세히 설명하세요.
+5. dependencies (의존성): 이 코드가 의존하고 있는 라이브러리, 외부 함수, 상태, 환경 변수 등을 나열하세요.
+6. executionFlow (실행 흐름): 코드의 실제 실행 순서와 데이터가 변하는 과정을 번호를 매겨 상세히 기록하세요.
 
 Code:
 \`\`\`
@@ -184,28 +401,29 @@ ${codeSnippet}
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          title: { type: Type.STRING, description: "기술적 제목 ('핵심 기능 + 기술' 형식)" },
-          summary: { type: Type.STRING, description: "기술적 역할 요약" },
-          components: { type: Type.STRING, description: "기술적 구성 요소" },
-          flow: { type: Type.STRING, description: "데이터/실행 흐름" },
-          io: { type: Type.STRING, description: "기술적 입출력" }
+          title: { type: Type.STRING },
+          summary: { type: Type.STRING },
+          technicalRole: { type: Type.STRING, description: "기술적 역할 요약" },
+          implementation: { type: Type.STRING, description: "구현 상세 설명" },
+          dependencies: { type: Type.STRING, description: "기술적 의존성" },
+          executionFlow: { type: Type.STRING, description: "데이터/실행 흐름" }
         },
-        required: ["title", "summary", "components", "flow", "io"]
+        required: ["title", "summary", "technicalRole", "implementation", "dependencies", "executionFlow"]
       }
     }
   });
 
-  const response = await withTimeout(responsePromise, 45000, { text: "{}" });
+  const response = await withTimeout(responsePromise, 45000, { text: "{}" } as any);
 
   try {
     const result = JSON.parse(response.text || "{}");
-    if (!result.title) {
-      return { title: title, summary: "", components: "", flow: "", io: "" };
+    if (!result.technicalRole) {
+      return { title: title, summary: "", technicalRole: "", implementation: "", dependencies: "", executionFlow: "" };
     }
     return result;
   } catch (e) {
     console.error("Failed to parse Gemini response", e);
-    return { title: title, summary: "", components: "", flow: "", io: "" };
+    return { title: title, summary: "", technicalRole: "", implementation: "", dependencies: "", executionFlow: "" };
   }
 };
 
@@ -253,20 +471,41 @@ ${logicsContext || "없음"}
 
 // Re-format existing note for better readability
 export const reformatNote = async (note: Partial<Note>) => {
-  const prompt = `다음 노트를 가독성 있게 재구성하세요.
+  let prompt = `다음 노트를 가독성 있게 재구성하세요.
 반드시 한국어로 작성해야 합니다.
 
 가독성을 극대화하기 위해 다음 규칙을 엄격히 준수하세요:
 1. 모든 항목은 마크다운(Markdown) 형식을 사용하세요.
-2. 'flow'와 'components'는 반드시 마크다운 리스트(- 또는 1.) 형식을 사용하세요. 가독성을 위해 리스트 항목(1. 2. 3. 등) 사이에는 **반드시 빈 줄(Empty Line)을 하나씩 삽입**하세요. (Loose List 형태)
-3. 'summary'와 'io'도 정보가 많을 경우 줄바꿈을 적극적으로 사용하세요.
+2. 리스트 항목 사이에는 **반드시 빈 줄(Empty Line)을 하나씩 삽입**하세요.
 
 기존 내용:
+Type: ${note.noteType}
+Title: ${note.title}
 Summary: ${note.summary}
-Components: ${note.components}
-Flow: ${note.flow}
-IO: ${note.io}
 `;
+
+  let properties: any = {
+    summary: { type: Type.STRING }
+  };
+  let required: string[] = ["summary"];
+
+  if (note.noteType === 'Domain') {
+    prompt += `Vision: ${note.vision}\nBoundaries: ${note.boundaries}\nStakeholders: ${note.stakeholders}\nKPIs: ${note.kpis}`;
+    properties = { ...properties, vision: { type: Type.STRING }, boundaries: { type: Type.STRING }, stakeholders: { type: Type.STRING }, kpis: { type: Type.STRING } };
+    required = [...required, "vision", "boundaries", "stakeholders", "kpis"];
+  } else if (note.noteType === 'Module') {
+    prompt += `UX Goals: ${note.uxGoals}\nRequirements: ${note.requirements}\nUser Journey: ${note.userJourney}\nIA: ${note.ia}`;
+    properties = { ...properties, uxGoals: { type: Type.STRING }, requirements: { type: Type.STRING }, userJourney: { type: Type.STRING }, ia: { type: Type.STRING } };
+    required = [...required, "uxGoals", "requirements", "userJourney", "ia"];
+  } else if (note.noteType === 'Logic') {
+    prompt += `Business Rules: ${note.businessRules}\nConstraints: ${note.constraints}\nIO Mapping: ${note.ioMapping}\nEdge Cases: ${note.edgeCases}`;
+    properties = { ...properties, businessRules: { type: Type.STRING }, constraints: { type: Type.STRING }, ioMapping: { type: Type.STRING }, edgeCases: { type: Type.STRING } };
+    required = [...required, "businessRules", "constraints", "ioMapping", "edgeCases"];
+  } else if (note.noteType === 'Snapshot') {
+    prompt += `Technical Role: ${note.technicalRole}\nImplementation: ${note.implementation}\nDependencies: ${note.dependencies}\nExecution Flow: ${note.executionFlow}`;
+    properties = { ...properties, technicalRole: { type: Type.STRING }, implementation: { type: Type.STRING }, dependencies: { type: Type.STRING }, executionFlow: { type: Type.STRING } };
+    required = [...required, "technicalRole", "implementation", "dependencies", "executionFlow"];
+  }
 
   const responsePromise = ai.models.generateContent({
     model: MODEL,
@@ -275,18 +514,13 @@ IO: ${note.io}
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
-        properties: {
-          summary: { type: Type.STRING },
-          components: { type: Type.STRING },
-          flow: { type: Type.STRING },
-          io: { type: Type.STRING }
-        },
-        required: ["summary", "components", "flow", "io"]
+        properties,
+        required
       }
     }
   });
 
-  const response = await withTimeout(responsePromise, 30000, { text: "{}" });
+  const response = await withTimeout(responsePromise, 30000, { text: "{}" } as any);
 
   try {
     return JSON.parse(response.text || "{}");
@@ -297,28 +531,34 @@ IO: ${note.io}
 };
 
 // Translate technical Snapshot data to Business Logic data
-export const translateToBusinessLogic = async (technicalData: { title: string, summary: string, components: string, flow: string, io: string }) => {
+export const translateToBusinessLogic = async (technicalData: { 
+  title: string, 
+  summary: string, 
+  technicalRole: string, 
+  implementation: string, 
+  dependencies: string, 
+  executionFlow: string 
+}) => {
   const prompt = `다음은 코드의 기술적 분석 내용(Snapshot)입니다. 이를 비전공자 개발자가 이해할 수 있는 '비즈니스 로직(의도)'으로 번역하세요.
-
-대칭성 유지: 반드시 동일하게 '제목-요약-구성요소-흐름-입출력' 5단계 구조를 유지해야 합니다.
 
 가독성을 극대화하기 위해 다음 규칙을 엄격히 준수하세요:
 1. 모든 항목은 마크다운(Markdown) 형식을 사용하세요.
-2. 'flow'와 'components'는 반드시 마크다운 리스트(- 또는 1.) 형식을 사용하세요. 가독성을 위해 리스트 항목(1. 2. 3. 등) 사이에는 **반드시 빈 줄(Empty Line)을 하나씩 삽입**하세요. (Loose List 형태)
-3. 'summary'와 'io'도 정보가 많을 경우 줄바꿈을 적극적으로 사용하세요.
+2. 리스트 항목 사이에는 **반드시 빈 줄(Empty Line)을 하나씩 삽입**하세요.
 
 번역 규칙:
 0. 제목(title): '서비스 명칭 + 핵심 가치' (사용자 경험/체험 중심) 형식으로 작성하되, 단일 책임 원칙에 따라 '가장 핵심적인 단 하나의 가치'만 명시하세요. 'A 및 B', 'A와 B'처럼 여러 기능을 나열하지 마세요. 수식어를 빼고 무엇을 하는 기능인지만 명확히 합니다. (예: '중복 방지 폴더 생성', '실시간 재고 반영', '사용자 인증 시스템')
-1. 기술적 구성 요소(변수명, 라이브러리, 특정 함수명 등) -> 비즈니스 구성 요소(비즈니스 개념, 기획 요소, 사용자 경험 요소)로 번역하세요.
-2. 실행 흐름(코드 실행 순서, 루프, 조건문 등) -> 논리적 흐름(사람의 의사결정 순서, 서비스 시나리오, 비즈니스 프로세스)으로 번역하세요.
-3. 기술적 입출력 -> 비즈니스적 입출력(사용자가 제공하는 정보, 시스템이 사용자에게 돌려주는 결과물)으로 번역하세요.
+1. businessRules (비즈니스 규칙): 코드가 구현하고 있는 핵심 비즈니스 로직과 정책.
+2. constraints (제약 사항): 비즈니스적으로 허용되지 않거나 제한해야 하는 조건.
+3. ioMapping (입출력 매핑): 사용자의 입력이 비즈니스 결과물로 어떻게 변환되는지.
+4. edgeCases (예외 상황): 비즈니스적으로 고려해야 할 특수 상황이나 오류 처리.
 
 기술적 데이터:
-원본 식별자 및 기술적 제목: ${technicalData.title}
+제목: ${technicalData.title}
 요약: ${technicalData.summary}
-구성요소: ${technicalData.components}
-흐름: ${technicalData.flow}
-입출력: ${technicalData.io}
+기술적 역할: ${technicalData.technicalRole}
+구현 상세: ${technicalData.implementation}
+의존성: ${technicalData.dependencies}
+실행 흐름: ${technicalData.executionFlow}
 `;
 
   const responsePromise = ai.models.generateContent({
@@ -329,13 +569,14 @@ export const translateToBusinessLogic = async (technicalData: { title: string, s
       responseSchema: {
         type: Type.OBJECT,
         properties: {
-          title: { type: Type.STRING, description: "비즈니스 친화적인 직관적인 한국어 제목 ('서비스 명칭 + 핵심 가치' 형식)" },
+          title: { type: Type.STRING, description: "비즈니스 친화적인 직관적인 한국어 제목" },
           summary: { type: Type.STRING, description: "비즈니스 요약" },
-          components: { type: Type.STRING, description: "비즈니스 구성 요소" },
-          flow: { type: Type.STRING, description: "논리적 흐름" },
-          io: { type: Type.STRING, description: "비즈니스 입출력" }
+          businessRules: { type: Type.STRING, description: "비즈니스 규칙" },
+          constraints: { type: Type.STRING, description: "제약 사항" },
+          ioMapping: { type: Type.STRING, description: "입출력 매핑" },
+          edgeCases: { type: Type.STRING, description: "예외 상황" }
         },
-        required: ["title", "summary", "components", "flow", "io"]
+        required: ["title", "summary", "businessRules", "constraints", "ioMapping", "edgeCases"]
       }
     }
   });
@@ -348,15 +589,23 @@ export const translateToBusinessLogic = async (technicalData: { title: string, s
       return {
         title: technicalData.title || "Untitled",
         summary: technicalData.summary || "",
-        components: technicalData.components || "",
-        flow: technicalData.flow || "",
-        io: technicalData.io || ""
+        businessRules: "",
+        constraints: "",
+        ioMapping: "",
+        edgeCases: ""
       };
     }
     return result;
   } catch (e) {
     console.error("Failed to translate to business logic", e);
-    return technicalData;
+    return {
+      title: technicalData.title || "Untitled",
+      summary: technicalData.summary || "",
+      businessRules: "",
+      constraints: "",
+      ioMapping: "",
+      edgeCases: ""
+    };
   }
 };
 
@@ -611,9 +860,10 @@ export const generateFixGuide = async (note: Note, fileContent: string) => {
 [기존 설계 문서]
 제목: ${note.title}
 요약: ${note.summary}
-구성요소: ${note.components}
-흐름: ${note.flow}
-입출력: ${note.io}
+비즈니스 규칙: ${note.businessRules || '없음'}
+제약 사항: ${note.constraints || '없음'}
+입출력 매핑: ${note.ioMapping || '없음'}
+예외 상황: ${note.edgeCases || '없음'}
 
 [현재 코드]
 \`\`\`
@@ -805,7 +1055,19 @@ export const generateProactiveNudgesWithKeywords = async (
   const systemContext = notes.map(n => {
     let text = `[${n.noteType}] ${n.title} (Status: ${n.status})`;
     if (n.summary) text += `\n  Summary: ${n.summary}`;
-    if (n.flow) text += `\n  Flow: ${n.flow}`;
+    if (n.noteType === 'Domain') {
+      if (n.vision) text += `\n  Vision: ${n.vision}`;
+      if (n.boundaries) text += `\n  Boundaries: ${n.boundaries}`;
+    } else if (n.noteType === 'Module') {
+      if (n.uxGoals) text += `\n  UX Goals: ${n.uxGoals}`;
+      if (n.requirements) text += `\n  Requirements: ${n.requirements}`;
+    } else if (n.noteType === 'Logic') {
+      if (n.businessRules) text += `\n  Business Rules: ${n.businessRules}`;
+      if (n.constraints) text += `\n  Constraints: ${n.constraints}`;
+    } else if (n.noteType === 'Snapshot') {
+      if (n.technicalRole) text += `\n  Technical Role: ${n.technicalRole}`;
+      if (n.executionFlow) text += `\n  Execution Flow: ${n.executionFlow}`;
+    }
     return text;
   }).join('\n\n');
 
@@ -905,6 +1167,12 @@ ${JSON.stringify(safeDraft, null, 2)}
 [사용자 피드백]
 ${feedback}
 
+[작성 지침]
+1. 사용자의 피드백을 정확히 반영하되, 전체적인 비즈니스 설계의 완성도를 높이는 방향으로 수정하세요.
+2. **구조의 견고함**: 도메인, 모듈, 로직의 계층 구조가 논리적으로 타당하고 부실하지 않게 구성하세요.
+3. 비전공자가 이해하기 쉬운 언어를 사용하세요.
+4. **상세 정보 제외**: 이 단계에서는 '제목(title)'과 '요약(summary)'만 생성하세요. 상세한 비즈니스 구성 요소나 흐름은 다음 단계에서 생성될 예정입니다.
+
 반드시 아래 JSON 형식으로만 응답하세요:
 {
   "domains": [
@@ -944,6 +1212,7 @@ ${feedback}
     return safeDraft;
   }
 };
+
 export const generateKeywords = async (notes: Note[]) => {
   const prompt = `현재 프로젝트의 설계 요약을 바탕으로, 인사이트를 생성하기 위한 핵심 키워드 5개를 생성하세요.
 [설계 요약]
@@ -966,6 +1235,7 @@ ${notes.map(n => n.title).join(', ')}
     return [];
   }
 };
+
 export const generateDetailedNodeContent = async (nodeType: string, title: string, summary: string, parentContext: string, siblingContext: string) => {
   const prompt = `당신은 비전공자 창업자를 돕는 친절한 기술 가이드입니다.
 다음 항목에 대한 상세 설명과 작동 규칙을 작성해주세요.
@@ -994,42 +1264,172 @@ export const generateDetailedNodeContent = async (nodeType: string, title: strin
   const response = await withTimeout(responsePromise, 45000, { text: `${summary}\n\n(상세 내용 생성 실패)` } as any);
   return response.text || summary;
 };
+export const generateDetailedBusinessDetails = async (nodeType: string, title: string, summary: string, parentContext: string, siblingContext: string) => {
+  let prompt = '';
+  let properties: any = {};
+  let required: string[] = [];
+
+  if (nodeType.includes('Domain')) {
+    prompt = `당신은 비즈니스 전략 전문가입니다. 다음 '주요 영역(Domain)'에 대한 전략적 상세 정보를 작성하세요.
+제목: ${title}
+요약: ${summary}
+[주변 맥락]
+- 함께 있는 다른 영역들: ${siblingContext || '없음'}
+
+[작성 지침]
+1. 비전공자 창업자도 이해할 수 있는 비즈니스 언어를 사용하세요.
+2. 다음 4가지 항목을 반드시 포함하여 JSON으로 응답하세요:
+   - vision (비즈니스 비전): 이 영역이 해결하려는 궁극적인 문제와 가치.
+   - boundaries (서비스 경계): 포함되는 기능과 포함되지 않는 기능의 명확한 구분.
+   - stakeholders (핵심 이해관계자): 이 영역을 사용하는 주요 사용자 페르소나와 시스템 액터.
+   - kpis (성공 지표): 이 영역이 잘 작동하고 있는지 판단할 수 있는 비즈니스 지표.
+`;
+    properties = {
+      vision: { type: Type.STRING },
+      boundaries: { type: Type.STRING },
+      stakeholders: { type: Type.STRING },
+      kpis: { type: Type.STRING }
+    };
+    required = ["vision", "boundaries", "stakeholders", "kpis"];
+  } else if (nodeType.includes('Module')) {
+    prompt = `당신은 UX/서비스 기획 전문가입니다. 다음 '세부 기능(Module)'에 대한 기획 상세 정보를 작성하세요.
+제목: ${title}
+요약: ${summary}
+[주변 맥락]
+- 상위 영역: ${parentContext}
+- 함께 있는 다른 기능들: ${siblingContext || '없음'}
+
+[작성 지침]
+1. 사용자 경험(UX) 관점에서 작성하세요.
+2. 다음 4가지 항목을 반드시 포함하여 JSON으로 응답하세요:
+   - uxGoals (사용자 목표): 사용자가 이 기능을 통해 달성하고자 하는 구체적인 목표.
+   - requirements (기능적 요구사항): 반드시 수행해야 하는 기능 리스트.
+   - userJourney (사용자 여정): 사용자가 기능을 사용하는 시나리오와 단계별 흐름.
+   - ia (정보 구조): 이 기능에서 다루는 주요 데이터 객체들의 관계.
+`;
+    properties = {
+      uxGoals: { type: Type.STRING },
+      requirements: { type: Type.STRING },
+      userJourney: { type: Type.STRING },
+      ia: { type: Type.STRING }
+    };
+    required = ["uxGoals", "requirements", "userJourney", "ia"];
+  } else { // Logic
+    prompt = `당신은 비즈니스 프로세스 설계 전문가입니다. 다음 '핵심 규칙(Logic)'에 대한 상세 로직 정보를 작성하세요.
+제목: ${title}
+요약: ${summary}
+[주변 맥락]
+- 상위 영역 및 기능: ${parentContext}
+- 함께 있는 다른 규칙들: ${siblingContext || '없음'}
+
+[작성 지침]
+1. 논리적이고 구체적으로 작성하세요.
+2. 다음 4가지 항목을 반드시 포함하여 JSON으로 응답하세요:
+   - businessRules (의사결정 규칙): '만약 ~라면 ~한다' 식의 구체적인 판단 로직.
+   - constraints (제약 조건): 데이터의 유효성, 보안 규칙, 정책적 한계.
+   - ioMapping (데이터 입출력 매핑): 입력값이 어떤 과정을 거쳐 어떤 결과값으로 변하는지 정의.
+   - edgeCases (예외 처리): 비정상적인 상황이나 오류 발생 시의 대응 규칙.
+`;
+    properties = {
+      businessRules: { type: Type.STRING },
+      constraints: { type: Type.STRING },
+      ioMapping: { type: Type.STRING },
+      edgeCases: { type: Type.STRING }
+    };
+    required = ["businessRules", "constraints", "ioMapping", "edgeCases"];
+  }
+
+  const responsePromise = ai.models.generateContent({
+    model: PRO_MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties,
+        required
+      }
+    }
+  });
+
+  const response = await withTimeout(responsePromise, 45000, { text: "{}" } as any);
+  try {
+    return JSON.parse(response.text || "{}");
+  } catch (e) {
+    return {};
+  }
+};
+
 export const generateDetailedBlueprint = async (blueprint: any, onProgress?: (msg: string) => void) => {
   const detailedDomains = [];
 
   for (const domain of blueprint.domains) {
     if (onProgress) onProgress(`도메인 상세화 중: ${domain.title}`);
     const domainSiblingContext = blueprint.domains.filter((d: any) => d.title !== domain.title).map((d: any) => `- ${d.title}: ${d.summary}`).join('\n');
-    const domainContent = await generateDetailedNodeContent('Domain', domain.title, domain.summary, '전체 시스템 아키텍처', domainSiblingContext);
+    
+    const [domainContent, domainDetails] = await Promise.all([
+      generateDetailedNodeContent('Domain', domain.title, domain.summary, '전체 시스템 아키텍처', domainSiblingContext),
+      generateDetailedBusinessDetails('Domain', domain.title, domain.summary, '전체 시스템 아키텍처', domainSiblingContext)
+    ]);
 
     const detailedModules = [];
     if (domain.modules) {
       if (onProgress) onProgress(`모듈 상세화 중 (${domain.modules.length}개 병렬 처리)...`);
-      // 병렬 처리로 속도 향상
       const modulePromises = domain.modules.map(async (mod: any) => {
         const modParentContext = `상위 도메인: ${domain.title} (${domain.summary})`;
         const modSiblingContext = domain.modules.filter((m: any) => m.title !== mod.title).map((m: any) => `- ${m.title}: ${m.summary}`).join('\n');
-        const modContent = await generateDetailedNodeContent('Module', mod.title, mod.summary, modParentContext, modSiblingContext);
+        
+        const [modContent, modDetails] = await Promise.all([
+          generateDetailedNodeContent('Module', mod.title, mod.summary, modParentContext, modSiblingContext),
+          generateDetailedBusinessDetails('Module', mod.title, mod.summary, modParentContext, modSiblingContext)
+        ]);
 
         const detailedLogics = [];
         if (mod.logics) {
-          // 로직도 병렬 처리
           const logicPromises = mod.logics.map(async (logic: any) => {
             const logicParentContext = `상위 도메인: ${domain.title}\n상위 모듈: ${mod.title} (${mod.summary})`;
             const logicSiblingContext = mod.logics.filter((l: any) => l.title !== logic.title).map((l: any) => `- ${l.title}: ${l.summary}`).join('\n');
-            const logicContent = await generateDetailedNodeContent('Logic', logic.title, logic.summary, logicParentContext, logicSiblingContext);
-            return { ...logic, content: logicContent };
+            
+            const [logicContent, logicDetails] = await Promise.all([
+              generateDetailedNodeContent('Logic', logic.title, logic.summary, logicParentContext, logicSiblingContext),
+              generateDetailedBusinessDetails('Logic', logic.title, logic.summary, logicParentContext, logicSiblingContext)
+            ]);
+
+            return { 
+              ...logic, 
+              content: logicContent,
+              businessRules: logicDetails.businessRules,
+              constraints: logicDetails.constraints,
+              ioMapping: logicDetails.ioMapping,
+              edgeCases: logicDetails.edgeCases
+            };
           });
           const resolvedLogics = await Promise.all(logicPromises);
           detailedLogics.push(...resolvedLogics);
         }
-        return { ...mod, content: modContent, logics: detailedLogics };
+        return { 
+          ...mod, 
+          content: modContent, 
+          uxGoals: modDetails.uxGoals,
+          requirements: modDetails.requirements,
+          userJourney: modDetails.userJourney,
+          ia: modDetails.ia,
+          logics: detailedLogics 
+        };
       });
 
       const resolvedModules = await Promise.all(modulePromises);
       detailedModules.push(...resolvedModules);
     }
-    detailedDomains.push({ ...domain, content: domainContent, modules: detailedModules });
+    detailedDomains.push({ 
+      ...domain, 
+      content: domainContent, 
+      vision: domainDetails.vision,
+      boundaries: domainDetails.boundaries,
+      stakeholders: domainDetails.stakeholders,
+      kpis: domainDetails.kpis,
+      modules: detailedModules 
+    });
   }
 
   return { domains: detailedDomains };
@@ -1090,7 +1490,7 @@ ${notes.map(n => `Type: ${n.noteType} | Priority: ${n.priority} | Title: ${n.tit
   }
 };
 
-export const generateModuleFromCluster = async (logics: {title: string, summary: string, components?: string, flow?: string, io?: string}[]) => {
+export const generateModuleFromCluster = async (logics: {title: string, summary: string, businessRules?: string, constraints?: string, ioMapping?: string, edgeCases?: string}[]) => {
   const prompt = `당신은 세계 최고의 소프트웨어 아키텍트입니다.
 다음은 수학적 유사도를 기반으로 군집화된 로직(Logic)들의 목록입니다. 이 로직들을 포괄하는 하나의 모듈(Module)을 설계하세요.
 
@@ -1100,16 +1500,21 @@ ${JSON.stringify(logics, null, 2)}
 [요구사항]
 1. 모듈의 이름(title)과 한 줄 요약(summary)을 **한국어**로 작성하세요.
 2. **중요**: 제목(title)은 개발자가 아닌 일반 사용자나 기획자도 한눈에 이해할 수 있을 만큼 **매우 직관적이고 쉬운 단어**를 사용하세요. (예: 'AuthModule' 대신 '사용자 인증 및 보안 관리')
-3. 하위 로직들의 정보를 종합하여 비즈니스 구성 요소(components), 논리적 흐름(flow), 비즈니스 입출력(io)을 마크다운 형식으로 작성하세요.
+3. 하위 로직들의 정보를 종합하여 다음 4가지 항목을 마크다운 형식으로 작성하세요:
+   - uxGoals (사용자 목표): 사용자가 이 모듈을 통해 달성하고자 하는 핵심 목표.
+   - requirements (기능적 요구사항): 모듈이 반드시 수행해야 하는 기능 리스트.
+   - userJourney (사용자 여정): 사용자가 기능을 사용하는 시나리오나 단계.
+   - ia (정보 구조): 주요 데이터 객체들의 관계나 구조.
 4. 가독성을 위해 리스트 항목 사이에는 반드시 빈 줄을 삽입하세요.
 
 반드시 아래 JSON 형식으로만 응답하세요:
 {
   "title": "직관적인 한국어 모듈 이름",
   "summary": "한국어 모듈 한 줄 요약",
-  "components": "마크다운 형식의 비즈니스 구성 요소",
-  "flow": "마크다운 형식의 논리적 흐름",
-  "io": "마크다운 형식의 비즈니스 입출력"
+  "uxGoals": "마크다운 형식의 사용자 목표",
+  "requirements": "마크다운 형식의 기능적 요구사항",
+  "userJourney": "마크다운 형식의 사용자 여정",
+  "ia": "마크다운 형식의 정보 구조"
 }`;
 
   const responsePromise = ai.models.generateContent({
@@ -1122,11 +1527,12 @@ ${JSON.stringify(logics, null, 2)}
         properties: {
           title: { type: Type.STRING },
           summary: { type: Type.STRING },
-          components: { type: Type.STRING },
-          flow: { type: Type.STRING },
-          io: { type: Type.STRING }
+          uxGoals: { type: Type.STRING },
+          requirements: { type: Type.STRING },
+          userJourney: { type: Type.STRING },
+          ia: { type: Type.STRING }
         },
-        required: ["title", "summary", "components", "flow", "io"]
+        required: ["title", "summary", "uxGoals", "requirements", "userJourney", "ia"]
       }
     }
   });
@@ -1136,11 +1542,11 @@ ${JSON.stringify(logics, null, 2)}
     return JSON.parse(response.text || "{}");
   } catch (e) {
     console.error("Failed to generate module from cluster", e);
-    return { title: "Unknown Module", summary: "Failed to generate", components: "", flow: "", io: "" };
+    return { title: "Unknown Module", summary: "Failed to generate", uxGoals: "", requirements: "", userJourney: "", ia: "" };
   }
 };
 
-export const generateDomainsFromModules = async (modules: {id: string, title: string, summary: string, components?: string, flow?: string, io?: string}[]) => {
+export const generateDomainsFromModules = async (modules: {id: string, title: string, summary: string, uxGoals?: string, requirements?: string, userJourney?: string, ia?: string}[]) => {
   const prompt = `당신은 세계 최고의 소프트웨어 아키텍트입니다.
 다음은 시스템을 구성하는 모듈(Module)들의 목록입니다. 이 모듈들을 분석하여 3~5개의 최상위 도메인(Domain)으로 분류하고 설계하세요.
 
@@ -1148,10 +1554,15 @@ export const generateDomainsFromModules = async (modules: {id: string, title: st
 ${JSON.stringify(modules, null, 2)}
 
 [요구사항]
-1. 각 도메인의 이름(title), 요약(summary), 비즈니스 구성 요소(components), 논리적 흐름(flow), 비즈니스 입출력(io)을 **한국어**로 작성하세요.
+1. 각 도메인의 이름(title), 요약(summary)을 **한국어**로 작성하세요.
 2. **중요**: 도메인 제목(title)은 시스템의 거대한 뼈대를 나타내므로, 누구나 한눈에 시스템의 큰 구역을 파악할 수 있도록 **매우 직관적이고 명확한 한국어 단어**를 사용하세요. (예: 'CoreDomain' 대신 '핵심 서비스 엔진')
-3. 각 도메인에 속하는 모듈들의 ID(moduleIds)를 배열로 매핑하세요. 모든 모듈은 반드시 하나의 도메인에 속해야 합니다.
-4. 가독성을 위해 리스트 항목 사이에는 반드시 빈 줄을 삽입하세요.
+3. 다음 4가지 항목을 마크다운 형식으로 작성하세요:
+   - vision (비즈니스 비전): 이 도메인이 해결하려는 궁극적인 문제와 가치.
+   - boundaries (서비스 경계): 포함되는 기능과 포함되지 않는 기능의 명확한 구분.
+   - stakeholders (핵심 이해관계자): 주요 사용자 페르소나와 시스템 액터.
+   - kpis (성공 지표): 비즈니스 성공을 판단할 수 있는 지표.
+4. 각 도메인에 속하는 모듈들의 ID(moduleIds)를 배열로 매핑하세요. 모든 모듈은 반드시 하나의 도메인에 속해야 합니다.
+5. 가독성을 위해 리스트 항목 사이에는 반드시 빈 줄을 삽입하세요.
 
 반드시 아래 JSON 형식으로만 응답하세요:
 {
@@ -1159,9 +1570,10 @@ ${JSON.stringify(modules, null, 2)}
     {
       "title": "직관적인 한국어 도메인 이름",
       "summary": "한국어 도메인 요약",
-      "components": "마크다운 형식의 비즈니스 구성 요소",
-      "flow": "마크다운 형식의 논리적 흐름",
-      "io": "마크다운 형식의 비즈니스 입출력",
+      "vision": "마크다운 형식의 비즈니스 비전",
+      "boundaries": "마크다운 형식의 서비스 경계",
+      "stakeholders": "마크다운 형식의 핵심 이해관계자",
+      "kpis": "마크다운 형식의 성공 지표",
       "moduleIds": ["모듈 ID 1", "모듈 ID 2"]
     }
   ]
@@ -1182,15 +1594,16 @@ ${JSON.stringify(modules, null, 2)}
               properties: {
                 title: { type: Type.STRING },
                 summary: { type: Type.STRING },
-                components: { type: Type.STRING },
-                flow: { type: Type.STRING },
-                io: { type: Type.STRING },
+                vision: { type: Type.STRING },
+                boundaries: { type: Type.STRING },
+                stakeholders: { type: Type.STRING },
+                kpis: { type: Type.STRING },
                 moduleIds: {
                   type: Type.ARRAY,
                   items: { type: Type.STRING }
                 }
               },
-              required: ["title", "summary", "components", "flow", "io", "moduleIds"]
+              required: ["title", "summary", "vision", "boundaries", "stakeholders", "kpis", "moduleIds"]
             }
           }
         },
@@ -1344,7 +1757,11 @@ ${notes.map(n => `- ${n.title} (${n.noteType})`).join('\n')}
 1. 비전공자도 이해할 수 있도록 아주 쉬운 일상 언어를 사용하세요.
 2. 기술 용어 대신 기능의 목적과 사용자 가치를 중심으로 설명하세요.
 3. 제목과 요약은 직관적이어야 하며, 사용자의 의도를 완벽하게 반영해야 합니다.
-4. 구조는 반드시 domains -> modules -> logics 계층 구조여야 합니다.
+4. 구조는 반드시 Domain -> Module -> Logic 계층 구조여야 합니다.
+5. 각 레벨별로 다음 필드를 반드시 포함하세요:
+   - Domain: title, summary, vision, boundaries
+   - Module: title, summary, uxGoals, requirements
+   - Logic: title, summary, businessRules, constraints, ioMapping, edgeCases
 
 반드시 아래 JSON 형식으로만 응답하세요:
 {
@@ -1352,14 +1769,22 @@ ${notes.map(n => `- ${n.title} (${n.noteType})`).join('\n')}
     {
       "title": "...",
       "summary": "...",
+      "vision": "...",
+      "boundaries": "...",
       "modules": [
         {
           "title": "...",
           "summary": "...",
+          "uxGoals": "...",
+          "requirements": "...",
           "logics": [
             {
               "title": "...",
-              "summary": "..."
+              "summary": "...",
+              "businessRules": "...",
+              "constraints": "...",
+              "ioMapping": "...",
+              "edgeCases": "..."
             }
           ]
         }
@@ -1384,6 +1809,8 @@ ${notes.map(n => `- ${n.title} (${n.noteType})`).join('\n')}
               properties: {
                 title: { type: Type.STRING },
                 summary: { type: Type.STRING },
+                vision: { type: Type.STRING },
+                boundaries: { type: Type.STRING },
                 modules: {
                   type: Type.ARRAY,
                   items: {
@@ -1391,23 +1818,29 @@ ${notes.map(n => `- ${n.title} (${n.noteType})`).join('\n')}
                     properties: {
                       title: { type: Type.STRING },
                       summary: { type: Type.STRING },
+                      uxGoals: { type: Type.STRING },
+                      requirements: { type: Type.STRING },
                       logics: {
                         type: Type.ARRAY,
                         items: {
                           type: Type.OBJECT,
                           properties: {
                             title: { type: Type.STRING },
-                            summary: { type: Type.STRING }
+                            summary: { type: Type.STRING },
+                            businessRules: { type: Type.STRING },
+                            constraints: { type: Type.STRING },
+                            ioMapping: { type: Type.STRING },
+                            edgeCases: { type: Type.STRING }
                           },
-                          required: ["title", "summary"]
+                          required: ["title", "summary", "businessRules", "constraints", "ioMapping", "edgeCases"]
                         }
                       }
                     },
-                    required: ["title", "summary", "logics"]
+                    required: ["title", "summary", "uxGoals", "requirements", "logics"]
                   }
                 }
               },
-              required: ["title", "summary", "modules"]
+              required: ["title", "summary", "vision", "boundaries", "modules"]
             }
           }
         },
@@ -1427,10 +1860,21 @@ ${notes.map(n => `- ${n.title} (${n.noteType})`).join('\n')}
       domains: {
         title: string;
         summary: string;
+        vision: string;
+        boundaries: string;
         modules: {
           title: string;
           summary: string;
-          logics: { title: string; summary: string; }[];
+          uxGoals: string;
+          requirements: string;
+          logics: { 
+            title: string; 
+            summary: string; 
+            businessRules: string;
+            constraints: string;
+            ioMapping: string;
+            edgeCases: string;
+          }[];
         }[];
       }[];
     };
@@ -1478,7 +1922,19 @@ export const generateProactiveNudges = async (notes: Note[], pastNudges: string[
   const systemContext = notes.map(n => {
     let text = `[${n.noteType}] ${n.title} (Status: ${n.status})`;
     if (n.summary) text += `\n  Summary: ${n.summary}`;
-    if (n.flow) text += `\n  Flow: ${n.flow}`;
+    if (n.noteType === 'Domain') {
+      if (n.vision) text += `\n  Vision: ${n.vision}`;
+      if (n.boundaries) text += `\n  Boundaries: ${n.boundaries}`;
+    } else if (n.noteType === 'Module') {
+      if (n.uxGoals) text += `\n  UX Goals: ${n.uxGoals}`;
+      if (n.requirements) text += `\n  Requirements: ${n.requirements}`;
+    } else if (n.noteType === 'Logic') {
+      if (n.businessRules) text += `\n  Business Rules: ${n.businessRules}`;
+      if (n.constraints) text += `\n  Constraints: ${n.constraints}`;
+    } else if (n.noteType === 'Snapshot') {
+      if (n.technicalRole) text += `\n  Technical Role: ${n.technicalRole}`;
+      if (n.executionFlow) text += `\n  Execution Flow: ${n.executionFlow}`;
+    }
     return text;
   }).join('\n\n');
 
@@ -1582,7 +2038,11 @@ ${notes.map(n => `- ${n.title} (${n.noteType})`).join('\n')}
 1. 비전공자도 이해할 수 있도록 아주 쉬운 일상 언어를 사용하세요.
 2. 기술 용어 대신 기능의 목적과 사용자 가치를 중심으로 설명하세요.
 3. 제목과 요약은 직관적이어야 하며, 이 기능이 추가되었을 때 서비스가 어떻게 좋아지는지 설명하세요.
-4. 구조는 반드시 domains -> modules -> logics 계층 구조여야 합니다.
+4. 구조는 반드시 Domain -> Module -> Logic 계층 구조여야 합니다.
+5. 각 레벨별로 다음 필드를 반드시 포함하세요:
+   - Domain: title, summary, vision, boundaries
+   - Module: title, summary, uxGoals, requirements
+   - Logic: title, summary, businessRules, constraints, ioMapping, edgeCases
 
 반드시 아래 JSON 형식으로만 응답하세요:
 {
@@ -1590,14 +2050,22 @@ ${notes.map(n => `- ${n.title} (${n.noteType})`).join('\n')}
     {
       "title": "...",
       "summary": "...",
+      "vision": "...",
+      "boundaries": "...",
       "modules": [
         {
           "title": "...",
           "summary": "...",
+          "uxGoals": "...",
+          "requirements": "...",
           "logics": [
             {
               "title": "...",
-              "summary": "..."
+              "summary": "...",
+              "businessRules": "...",
+              "constraints": "...",
+              "ioMapping": "...",
+              "edgeCases": "..."
             }
           ]
         }
@@ -1622,6 +2090,8 @@ ${notes.map(n => `- ${n.title} (${n.noteType})`).join('\n')}
               properties: {
                 title: { type: Type.STRING },
                 summary: { type: Type.STRING },
+                vision: { type: Type.STRING },
+                boundaries: { type: Type.STRING },
                 modules: {
                   type: Type.ARRAY,
                   items: {
@@ -1629,23 +2099,29 @@ ${notes.map(n => `- ${n.title} (${n.noteType})`).join('\n')}
                     properties: {
                       title: { type: Type.STRING },
                       summary: { type: Type.STRING },
+                      uxGoals: { type: Type.STRING },
+                      requirements: { type: Type.STRING },
                       logics: {
                         type: Type.ARRAY,
                         items: {
                           type: Type.OBJECT,
                           properties: {
                             title: { type: Type.STRING },
-                            summary: { type: Type.STRING }
+                            summary: { type: Type.STRING },
+                            businessRules: { type: Type.STRING },
+                            constraints: { type: Type.STRING },
+                            ioMapping: { type: Type.STRING },
+                            edgeCases: { type: Type.STRING }
                           },
-                          required: ["title", "summary"]
+                          required: ["title", "summary", "businessRules", "constraints", "ioMapping", "edgeCases"]
                         }
                       }
                     },
-                    required: ["title", "summary", "logics"]
+                    required: ["title", "summary", "uxGoals", "requirements", "logics"]
                   }
                 }
               },
-              required: ["title", "summary", "modules"]
+              required: ["title", "summary", "vision", "boundaries", "modules"]
             }
           }
         },
@@ -1665,10 +2141,21 @@ ${notes.map(n => `- ${n.title} (${n.noteType})`).join('\n')}
       domains: {
         title: string;
         summary: string;
+        vision: string;
+        boundaries: string;
         modules: {
           title: string;
           summary: string;
-          logics: { title: string; summary: string; }[];
+          uxGoals: string;
+          requirements: string;
+          logics: { 
+            title: string; 
+            summary: string; 
+            businessRules: string;
+            constraints: string;
+            ioMapping: string;
+            edgeCases: string;
+          }[];
         }[];
       }[];
     };

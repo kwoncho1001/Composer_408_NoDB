@@ -58,3 +58,35 @@ export function removeUndefined<T extends Record<string, any>>(obj: T): T {
   });
   return newObj;
 }
+
+export async function withRetry<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelayMs: number = 2000
+): Promise<T> {
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      attempt++;
+      const errorMessage = error?.message || String(error);
+      const isRetryable = 
+        error?.status === 503 || 
+        error?.status === 429 || 
+        errorMessage.includes('503') || 
+        errorMessage.includes('429') || 
+        errorMessage.includes('UNAVAILABLE') ||
+        errorMessage.includes('Too Many Requests');
+      
+      if (!isRetryable || attempt >= maxRetries) {
+        throw error;
+      }
+      
+      const delay = baseDelayMs * Math.pow(2, attempt - 1) + Math.random() * 1000;
+      console.warn(`Operation failed with retryable error. Retrying in ${Math.round(delay)}ms (Attempt ${attempt} of ${maxRetries})...`, errorMessage);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  throw new Error("Max retries reached");
+}
